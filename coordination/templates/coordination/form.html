@@ -1,0 +1,1 @@
+{% extends 'coordination/base.html' %}{% block content %}<h1>{{ title|default:'إعداد كلمة المرور' }}</h1><div class="card"><form method="post">{% csrf_token %}{{ form.as_p }}<button>حفظ ومتابعة</button></form></div>{% endblock %}
