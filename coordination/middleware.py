@@ -9,7 +9,7 @@ class DatabaseIdentityMiddleware:
         self.get_response = get_response
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user"
+                "SELECT rolsuper,rolbypassrls OR EXISTS(SELECT 1 FROM pg_roles elevated WHERE elevated.rolbypassrls AND pg_has_role(current_user,elevated.oid,'MEMBER')) FROM pg_roles WHERE rolname=current_user"
             )
             role = cursor.fetchone()
             if role and (role[0] or role[1]):

@@ -83,7 +83,7 @@ def has_conflicts(activity):
             for day, start, end, venue in candidates:
                 cursor.execute(
                     "SELECT public.etcs_conflict(%s,%s,%s,%s,%s)",
-                    [str(activity.pk), day, start, end, venue],
+                    [str(activity.pk), day, start, end, venue_key(venue)],
                 )
                 if cursor.fetchone()[0]:
                     return True
@@ -115,3 +115,70 @@ def has_conflicts(activity):
         ):
             return True
     return False
+
+
+def venue_key(venue):
+    import hashlib, hmac
+
+    return (
+        hmac.new(
+            settings.SECRET_KEY.encode(), venue.strip().encode(), hashlib.sha256
+        ).hexdigest()
+        if venue
+        else ""
+    )
+
+
+def sync_calendar(activity_id):
+    """Maintain a projection containing approved, public-safe fields only."""
+    from .models import CalendarEntry
+
+    activity = Activity.objects.select_related("club").filter(pk=activity_id).first()
+    CalendarEntry.objects.filter(activity_id=activity_id).delete()
+    if not activity or activity.status != "approved":
+        return
+    rows = []
+    if activity.date and (
+        activity.kind == "event" or not activity.workshop_sessions.exists()
+    ):
+        rows.append(
+            CalendarEntry(
+                uid=str(activity.pk),
+                activity=activity,
+                title=activity.title,
+                date=activity.date,
+                start=activity.start,
+                end=activity.end,
+                club_name=activity.club.name,
+                kind=activity.kind,
+                venue_key=venue_key(activity.venue) if activity.kind == "event" else "",
+            )
+        )
+    for row in activity.event_dates.all():
+        rows.append(
+            CalendarEntry(
+                uid=f"day-{row.pk}",
+                activity=activity,
+                title=activity.title,
+                date=row.date,
+                start=row.start,
+                end=row.end,
+                club_name=activity.club.name,
+                kind="event",
+                venue_key=venue_key(row.venue),
+            )
+        )
+    for row in activity.workshop_sessions.all():
+        rows.append(
+            CalendarEntry(
+                uid=f"session-{row.pk}",
+                activity=activity,
+                title=row.title,
+                date=row.date,
+                start=row.start,
+                end=row.end,
+                club_name=activity.club.name,
+                kind="online",
+            )
+        )
+    CalendarEntry.objects.bulk_create(rows)

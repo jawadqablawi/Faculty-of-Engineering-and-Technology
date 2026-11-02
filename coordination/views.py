@@ -16,6 +16,7 @@ from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import send_mail
 from django.core import signing
+from django.conf import settings
 from .security import consume_limit
 from .documents import validate_document
 from django.db import transaction
@@ -85,6 +86,7 @@ def context(request):
         p = profile(request.user)
         return {
             "identity": p,
+            "upload_limit_mb": settings.ETCS_MAX_UPLOAD_BYTES // (1024 * 1024),
             "admin_mode": p.role != "club",
             "can_requests": allowed(request.user, "requests", True),
             "can_cases": allowed(request.user, "cases"),
@@ -567,11 +569,9 @@ def letter(request, pk):
     require(request.user, "letters")
     obj = get_object_or_404(Letter, pk=pk, activity__in=activities(request.user))
     if request.GET.get("pdf"):
-        from django.template.loader import render_to_string
-        from weasyprint import HTML
+        from .pdf import render_pdf
 
-        html = render_to_string("coordination/letter_print.html", {"letter": obj})
-        data = HTML(string=html).write_pdf()
+        data = render_pdf("coordination/letter_print.html", {"letter": obj})
         return HttpResponse(
             data,
             content_type="application/pdf",
@@ -882,13 +882,10 @@ def reports(request):
         out.seek(0)
         return FileResponse(out, as_attachment=True, filename="etcs-report.xlsx")
     if request.GET.get("export") == "pdf":
-        from weasyprint import HTML
-        from django.template.loader import render_to_string
+        from .pdf import render_pdf
 
         return HttpResponse(
-            HTML(
-                string=render_to_string("coordination/report_print.html", {"rows": q})
-            ).write_pdf(),
+            render_pdf("coordination/report_print.html", {"rows": q}),
             content_type="application/pdf",
         )
     submitted = dict(q.exclude(submitted__isnull=True).values_list("pk", "submitted"))
@@ -1311,16 +1308,13 @@ def operations_report(request, kind):
         stream.seek(0)
         return FileResponse(stream, as_attachment=True, filename=f"etcs-{kind}.xlsx")
     if request.GET.get("export") == "pdf":
-        from weasyprint import HTML
-        from django.template.loader import render_to_string
+        from .pdf import render_pdf
 
         return HttpResponse(
-            HTML(
-                string=render_to_string(
-                    "coordination/generic_print.html",
-                    {"headers": headers, "rows": rows, "title": title},
-                )
-            ).write_pdf(),
+            render_pdf(
+                "coordination/generic_print.html",
+                {"headers": headers, "rows": rows, "title": title},
+            ),
             content_type="application/pdf",
         )
     return render(

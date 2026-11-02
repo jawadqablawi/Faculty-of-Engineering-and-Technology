@@ -17,7 +17,12 @@ class Command(BaseCommand):
                 "SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=%s", [name]
             )
             row = c.fetchone()
-            if not row or row[0] or row[1]:
+            c.execute(
+                "SELECT EXISTS(SELECT 1 FROM pg_roles elevated WHERE elevated.rolbypassrls AND pg_has_role(%s,elevated.oid,'MEMBER'))",
+                [name],
+            )
+            inherited_bypass = c.fetchone()[0]
+            if not row or row[0] or row[1] or inherited_bypass:
                 raise CommandError(
                     "Role must exist and must not be superuser or bypass RLS"
                 )

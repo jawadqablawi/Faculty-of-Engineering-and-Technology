@@ -9,3 +9,5 @@ staticfiles/
 .env.*
 !.env.example
 .backups/
+
+.vercel/

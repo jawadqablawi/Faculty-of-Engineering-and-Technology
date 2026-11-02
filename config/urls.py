@@ -2,8 +2,10 @@ from django.contrib import admin
 from django.contrib.auth import views as auth
 from django.urls import path
 from coordination import views as v, extra_views as x
+from coordination.serverless_views import cron_reminders
 
 urlpatterns = [
+    path("cron/reminders/", cron_reminders, name="cron_reminders"),
     path("letters/", x.letter_list, name="letters"),
     path("clubs/", x.clubs_overview, name="clubs"),
     path("club-meetings/", x.club_meetings, name="club_meetings"),

@@ -5,6 +5,7 @@ from pathlib import Path
 import uuid
 import zipfile
 from django.core.exceptions import ValidationError
+from django.conf import settings
 
 SIGNATURES = {
     ".pdf": b"%PDF-",
@@ -18,8 +19,10 @@ SIGNATURES = {
 
 def validate_document(file):
     ext = Path(file.name).suffix.lower() if file else ""
-    if not file or file.size > 10 * 1024 * 1024 or ext not in SIGNATURES:
-        raise ValidationError("ملف غير صالح: PDF، PNG، JPG، DOCX، XLSX حتى 10 ميغابايت")
+    if not file or file.size > settings.ETCS_MAX_UPLOAD_BYTES or ext not in SIGNATURES:
+        raise ValidationError(
+            f"ملف غير صالح: PDF، PNG، JPG، DOCX، XLSX حتى {settings.ETCS_MAX_UPLOAD_BYTES // (1024 * 1024)} ميغابايت"
+        )
     if not file.read(8).startswith(SIGNATURES[ext]):
         raise ValidationError("محتوى الملف لا يطابق نوعه")
     file.seek(0)

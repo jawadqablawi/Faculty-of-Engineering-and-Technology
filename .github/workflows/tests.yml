@@ -25,3 +25,7 @@ jobs:
       - run: python scripts/postgres_smoke.py
         env:
           ETCS_TEST_DATABASE_URL: postgresql://postgres:temporary-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+
+      - run: python scripts/vercel_smoke.py
+        env:
+          ETCS_TEST_DATABASE_URL: postgresql://postgres:temporary-ci-only@127.0.0.1:5432/postgres?sslmode=disable

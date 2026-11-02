@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+*.sqlite3
+private_media/
+__pycache__/
+*.pyc
+.backups/
+docs/
+coordination/tests.py
+coordination/test_*.py
+scripts/

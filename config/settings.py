@@ -11,6 +11,18 @@ if not SECRET_KEY:
             "Set ETCS_SECRET_KEY; use ETCS_DEBUG=1 only for local development"
         )
     SECRET_KEY = "local-development-only-do-not-deploy"
+if os.environ.get("VERCEL") == "1":
+    platform_hosts = [
+        os.environ.get(key, "").strip()
+        for key in ["VERCEL_PROJECT_PRODUCTION_URL", "VERCEL_URL"]
+        if os.environ.get(key, "").strip()
+    ]
+    if not os.environ.get("ETCS_ALLOWED_HOSTS") and platform_hosts:
+        os.environ["ETCS_ALLOWED_HOSTS"] = ",".join(platform_hosts)
+    if not os.environ.get("ETCS_TRUSTED_ORIGINS") and platform_hosts:
+        os.environ["ETCS_TRUSTED_ORIGINS"] = ",".join(
+            "https://" + host for host in platform_hosts
+        )
 if not DEBUG:
     if len(SECRET_KEY) < 50:
         raise RuntimeError(
@@ -109,7 +121,28 @@ SECURE_HSTS_SECONDS = int(os.environ.get("ETCS_HSTS_SECONDS", "0" if DEBUG else 
 
 # PostgreSQL is selected explicitly; SQLite remains supported for local development.
 if os.environ.get("DATABASE_URL"):
-    db = urlparse(os.environ["DATABASE_URL"])
+    database_connection = os.environ["DATABASE_URL"]
+    if os.environ.get("VERCEL") == "1" and os.environ.get("ETCS_DEPLOY_PREPARE") != "1":
+        import hashlib, hmac
+        from urllib.parse import quote, urlunparse
+
+        runtime_role = os.environ.get("ETCS_RUNTIME_ROLE", "etcs_vercel_web")
+        runtime_password = hmac.new(
+            SECRET_KEY.encode(),
+            ("etcs-runtime:" + runtime_role).encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        original = urlparse(database_connection)
+        database_connection = urlunparse(
+            original._replace(
+                netloc=quote(runtime_role)
+                + ":"
+                + runtime_password
+                + "@"
+                + original.netloc.split("@")[-1]
+            )
+        )
+    db = urlparse(database_connection)
     if db.scheme not in ["postgres", "postgresql"]:
         raise RuntimeError("DATABASE_URL must use PostgreSQL")
     from urllib.parse import unquote
@@ -126,6 +159,10 @@ if os.environ.get("DATABASE_URL"):
             "OPTIONS": {"sslmode": parse_qs(db.query).get("sslmode", ["require"])[0]},
         }
     }
+    if parse_qs(db.query).get("channel_binding"):
+        DATABASES["default"]["OPTIONS"]["channel_binding"] = parse_qs(db.query)[
+            "channel_binding"
+        ][0]
 CSRF_TRUSTED_ORIGINS = [
     x for x in os.environ.get("ETCS_TRUSTED_ORIGINS", "").split(",") if x
 ]
@@ -160,3 +197,24 @@ ETCS_EMAIL_NOTIFICATIONS = os.environ.get("ETCS_EMAIL_NOTIFICATIONS", "0") == "1
 ETCS_CASE_RETENTION_DAYS = max(
     1, int(os.environ.get("ETCS_CASE_RETENTION_DAYS", "365"))
 )
+
+ETCS_MAX_UPLOAD_BYTES = int(
+    os.environ.get("ETCS_MAX_UPLOAD_BYTES", str(10 * 1024 * 1024))
+)
+ETCS_PDF_BACKEND = os.environ.get("ETCS_PDF_BACKEND", "weasyprint")
+ETCS_SERVERLESS = os.environ.get("VERCEL", "") == "1"
+ETCS_CRON_SECRET = os.environ.get("CRON_SECRET", "")
+if ETCS_SERVERLESS:
+    if not os.environ.get("DATABASE_URL"):
+        raise RuntimeError(
+            "Vercel requires external PostgreSQL; SQLite data would be lost"
+        )
+    if not ETCS_RLS:
+        raise RuntimeError("Set ETCS_RLS=1 on Vercel to enforce database isolation")
+    DATABASES["default"]["CONN_MAX_AGE"] = 0
+    DATABASES["default"]["OPTIONS"]["prepare_threshold"] = None
+    STORAGES["default"] = {"BACKEND": "coordination.storage.DatabaseStorage"}
+    ETCS_MAX_UPLOAD_BYTES = 3 * 1024 * 1024
+    DATA_UPLOAD_MAX_MEMORY_SIZE = 4 * 1024 * 1024
+    ETCS_PDF_BACKEND = "fpdf"
+    MEDIA_ROOT = Path("/tmp/etcs-unused-media")

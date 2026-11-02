@@ -519,3 +519,31 @@ class EmailDelivery(models.Model):
     attempts = models.PositiveIntegerField(default=0)
     last_attempt = models.DateTimeField(null=True, blank=True)
     sent = models.DateTimeField(null=True, blank=True)
+
+
+class StoredDocument(models.Model):
+    name = models.CharField(max_length=255, primary_key=True)
+    data = models.BinaryField()
+    size = models.PositiveIntegerField()
+    uploader = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="stored_documents",
+    )
+    created = models.DateTimeField(auto_now_add=True)
+
+
+class CalendarEntry(models.Model):
+    uid = models.CharField(max_length=80, primary_key=True)
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="calendar_entries"
+    )
+    title = models.CharField(max_length=200)
+    date = models.DateField()
+    start = models.TimeField(null=True, blank=True)
+    end = models.TimeField(null=True, blank=True)
+    club_name = models.CharField(max_length=180)
+    kind = models.CharField(max_length=10)
+    venue_key = models.CharField(max_length=64, blank=True)
