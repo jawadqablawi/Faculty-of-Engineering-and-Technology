@@ -178,7 +178,7 @@ class WorkflowTests(TestCase):
         payload.update(
             {
                 f"{key}-{suffix}": value
-                for key in ["program", "speakers", "partners"]
+                for key in ["program", "speakers", "partners", "extra_dates"]
                 for suffix, value in [("TOTAL_FORMS", "1"), ("INITIAL_FORMS", "0")]
             }
         )
@@ -339,7 +339,7 @@ class WorkflowTests(TestCase):
         payload.update(
             {
                 f"{key}-{suffix}": value
-                for key in ["program", "speakers", "partners"]
+                for key in ["program", "speakers", "partners", "extra_dates"]
                 for suffix, value in [("TOTAL_FORMS", "1"), ("INITIAL_FORMS", "0")]
             }
         )

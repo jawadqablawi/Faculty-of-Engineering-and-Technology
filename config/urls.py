@@ -1,9 +1,37 @@
 from django.contrib import admin
 from django.contrib.auth import views as auth
 from django.urls import path
-from coordination import views as v
+from coordination import views as v, extra_views as x
 
 urlpatterns = [
+    path("letters/", x.letter_list, name="letters"),
+    path("clubs/", x.clubs_overview, name="clubs"),
+    path("club-meetings/", x.club_meetings, name="club_meetings"),
+    path("club-meetings/<int:pk>/", x.club_meetings, name="club_meeting_edit"),
+    path(
+        "manage/invitations/<int:pk>/revoke/",
+        x.revoke_invitation,
+        name="revoke_invitation",
+    ),
+    path("healthz/", v.health, name="health"),
+    path("requests/<uuid:pk>/comment/", x.comment, name="comment"),
+    path("requests/<uuid:pk>/publications/", x.publications, name="publications"),
+    path(
+        "requests/<uuid:pk>/publications/<int:item>/",
+        x.publications,
+        name="publication_edit",
+    ),
+    path("requests/<uuid:pk>/approvals/new/", x.approval, name="approval_new"),
+    path("requests/<uuid:pk>/approvals/<int:item>/", x.approval, name="approval_edit"),
+    path("clubs/<int:pk>/", x.club_profile, name="club_profile"),
+    path("clubs/<int:pk>/plan/", x.plan, name="plan"),
+    path("clubs/<int:pk>/plan/<int:item>/", x.plan, name="plan_edit"),
+    path("clubs/<int:pk>/logo/", x.logo, name="logo"),
+    path("cases/<int:pk>/upload/", x.case_upload, name="case_upload"),
+    path("case-files/<uuid:pk>/", x.case_download, name="case_download"),
+    path("tasks/mine/", x.my_tasks, name="my_tasks"),
+    path("tasks/<int:pk>/status/", x.task_status, name="task_status"),
+    path("manage/audit/", x.audit_log, name="audit_log"),
     path(
         "reports/operations/<str:kind>/", v.operations_report, name="operations_report"
     ),
@@ -12,7 +40,7 @@ urlpatterns = [
     path("logout/", auth.LogoutView.as_view(), name="logout"),
     path(
         "password-reset/",
-        auth.PasswordResetView.as_view(
+        v.LimitedPasswordReset.as_view(
             template_name="coordination/form.html",
             email_template_name="coordination/reset_email.txt",
         ),

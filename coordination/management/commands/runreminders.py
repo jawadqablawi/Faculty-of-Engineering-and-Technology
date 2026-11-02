@@ -13,6 +13,7 @@ class Command(BaseCommand):
         while True:
             close_old_connections()
             call_command("reminders")
+            call_command("deliver_email")
             if options["once"]:
                 return
             try:

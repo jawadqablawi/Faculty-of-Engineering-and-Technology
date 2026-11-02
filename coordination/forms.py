@@ -1,5 +1,17 @@
 from django import forms
-from .models import Activity, Letter, Case, Task, Meeting, Idea, Report, Club
+from .models import (
+    Activity,
+    Letter,
+    Case,
+    Task,
+    Meeting,
+    Idea,
+    Report,
+    Club,
+    EventDate,
+    Publication,
+    ClubPlan,
+)
 
 
 class ActivityForm(forms.ModelForm):
@@ -108,6 +120,14 @@ DETAIL_FIELDS = {
     "registration_open": "بدء التسجيل",
     "reminders": "مواعيد التذكير",
     "post_publication": "موعد النشر بعد الورشة",
+    "registration_required": "التسجيل مطلوب؟",
+    "announcement_required": "إعلان مطلوب؟",
+    "media_team": "فريق الإعلام المسؤول",
+    "promotional_text": "النص الترويجي",
+    "presenter_qualifications": "مؤهلات مقدم الورشة ومؤسسته",
+    "presenter_contact": "التواصل مع مقدم الورشة",
+    "content_outline": "محاور المحتوى",
+    "accessibility": "احتياجات إمكانية الوصول",
     "notes": "ملاحظات إضافية",
 }
 
@@ -123,6 +143,9 @@ class DetailsForm(forms.Form):
             "registration_open",
             "reminders",
             "post_publication",
+            "presenter_qualifications",
+            "presenter_contact",
+            "content_outline",
         }
         physical = {
             "activity_type",
@@ -138,7 +161,13 @@ class DetailsForm(forms.Form):
             "partners",
         }
         for k, v in DETAIL_FIELDS.items():
-            if k in {"program", "speakers", "partners"}:
+            if k in {
+                "program",
+                "speakers",
+                "partners",
+                "additional_dates",
+                "publication_status",
+            }:
                 continue
             if (kind == "event" and k in online) or (
                 kind == "online" and k in physical
@@ -169,6 +198,81 @@ class DetailsForm(forms.Form):
             self.fields[k] = forms.CharField(
                 label=v, required=False, widget=widget, max_length=4000
             )
+            if k in {
+                "publication_date",
+                "registration_deadline",
+                "registration_open",
+                "post_publication",
+                "alternative_date",
+            }:
+                self.fields[k] = forms.DateField(label=v, required=False, widget=widget)
+            elif k == "publication_time":
+                self.fields[k] = forms.TimeField(
+                    label=v,
+                    required=False,
+                    widget=forms.TimeInput(attrs={"type": "time"}),
+                )
+            elif k == "registration_url":
+                self.fields[k] = forms.URLField(label=v, required=False)
+            elif k in {"registration_required", "announcement_required"}:
+                self.fields[k] = forms.BooleanField(label=v, required=False)
+            elif k == "capacity":
+                self.fields[k] = forms.IntegerField(
+                    label=v, required=False, min_value=1
+                )
+
+            elif k in {"setup", "cleanup"}:
+                self.fields[k] = forms.TimeField(
+                    label=v,
+                    required=False,
+                    widget=forms.TimeInput(attrs={"type": "time"}),
+                )
+            elif k == "activity_type":
+                self.fields[k] = forms.ChoiceField(
+                    label=v,
+                    required=False,
+                    choices=[("", "اختر النوع")]
+                    + [
+                        (x, x)
+                        for x in [
+                            "دورة",
+                            "ورشة عمل",
+                            "مسابقة",
+                            "مؤتمر",
+                            "معرض",
+                            "زيارة علمية",
+                            "نشاط طلابي",
+                            "لقاء أو ندوة",
+                            "فعالية ترفيهية",
+                            "أخرى",
+                        ]
+                    ],
+                )
+            elif k == "scope":
+                self.fields[k] = forms.ChoiceField(
+                    label=v,
+                    required=False,
+                    choices=[
+                        ("internal", "داخل الجامعة"),
+                        ("external", "خارج الجامعة"),
+                    ],
+                )
+            elif k == "indoor":
+                self.fields[k] = forms.ChoiceField(
+                    label=v,
+                    required=False,
+                    choices=[("indoor", "داخلي"), ("outdoor", "خارجي")],
+                )
+
+    def clean(self):
+        data = super().clean()
+        if (
+            data.get("registration_open")
+            and data.get("registration_deadline")
+            and data["registration_deadline"] < data["registration_open"]
+        ):
+            self.add_error("registration_deadline", "نهاية التسجيل يجب أن تلي بدايته")
+        return data
 
 
 class RequirementForm(forms.Form):
@@ -282,6 +386,17 @@ def model_form(model, exclude=()):
         "recommendations": "التوصيات",
         "costs": "التكلفة الفعلية ₪",
         "name": "الاسم",
+        "month": "الشهر (اختر أي يوم فيه)",
+        "activities": "الأنشطة المخطط لها",
+        "scheduled": "تاريخ ووقت النشر",
+        "channel": "قناة النشر",
+        "responsible": "المسؤول عن النشر",
+        "contact": "التواصل (عند الحاجة)",
+        "department": "القسم المعني",
+        "logo": "شعار النادي",
+        "participants": "المشاركون",
+        "submitted_date": "تاريخ الإرسال",
+        "response_date": "تاريخ الرد",
         "active": "نشط",
         "email": "البريد الإلكتروني",
         "president": "رئيس النادي",
@@ -294,9 +409,9 @@ def model_form(model, exclude=()):
 
 
 LetterForm = model_form(Letter, ("activity",))
-CaseForm = model_form(Case, ("assigned",))
+CaseForm = model_form(Case)
 TaskForm = model_form(Task)
-MeetingForm = model_form(Meeting)
+MeetingForm = model_form(Meeting, ("creator",))
 IdeaForm = model_form(Idea, ("club", "outcome", "notes"))
 ReportForm = model_form(Report, ("activity", "accepted", "correction_note"))
 ClubForm = model_form(Club)
@@ -355,3 +470,33 @@ Speakers = forms.formset_factory(
 Partners = forms.formset_factory(
     PartnerForm, extra=1, can_delete=True, max_num=50, validate_max=True
 )
+
+
+class EventDateForm(forms.ModelForm):
+    class Meta:
+        model = EventDate
+        fields = ["date", "start", "end", "venue"]
+        labels = {
+            "date": "تاريخ إضافي",
+            "start": "البداية",
+            "end": "النهاية",
+            "venue": "الموقع",
+        }
+        widgets = {
+            "date": forms.DateInput(attrs={"type": "date"}),
+            "start": forms.TimeInput(attrs={"type": "time"}),
+            "end": forms.TimeInput(attrs={"type": "time"}),
+        }
+
+    def clean(self):
+        d = super().clean()
+        if d.get("start") and d.get("end") and d["end"] <= d["start"]:
+            self.add_error("end", "النهاية يجب أن تلي البداية")
+        return d
+
+
+ExtraDates = forms.formset_factory(
+    EventDateForm, extra=1, can_delete=True, max_num=30, validate_max=True
+)
+PublicationForm = model_form(Publication, ("activity",))
+PlanForm = model_form(ClubPlan, ("club",))

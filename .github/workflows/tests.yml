@@ -1,0 +1,27 @@
+name: ETCS tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: temporary-ci-only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core
+      - run: pip install -r requirements.lock.txt
+      - run: python manage.py collectstatic --noinput && python manage.py test && python manage.py makemigrations --check --dry-run
+        env:
+          ETCS_DEBUG: '1'
+      - run: python scripts/postgres_smoke.py
+        env:
+          ETCS_TEST_DATABASE_URL: postgresql://postgres:temporary-ci-only@127.0.0.1:5432/postgres?sslmode=disable

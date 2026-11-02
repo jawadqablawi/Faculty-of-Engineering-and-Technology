@@ -5,3 +5,7 @@ __pycache__/
 db.sqlite3
 private_media/
 staticfiles/
+
+.env.*
+!.env.example
+.backups/

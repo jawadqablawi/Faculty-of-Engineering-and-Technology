@@ -1,14 +1,23 @@
 import json, io
-from datetime import timedelta
+from datetime import timedelta, datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.forms import SetPasswordForm, AuthenticationForm
-from django.contrib.auth.views import LoginView
+from django.contrib.auth.forms import (
+    SetPasswordForm,
+    AuthenticationForm,
+    PasswordResetForm,
+)
+from smtplib import SMTPException
+import logging
+from django.contrib.auth.views import LoginView, PasswordResetView
 from django.contrib import messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import send_mail
-from django.core.cache import cache
+from django.core import signing
+from .security import consume_limit
+from .documents import validate_document
 from django.db import transaction
 from django.db.models import Q, Count, Sum
 from django.http import FileResponse, HttpResponse, JsonResponse
@@ -20,6 +29,25 @@ from .models import *
 from .forms import *
 from .access import profile, allowed, require, activities
 from .services import transition, audit
+
+
+class SafePasswordResetForm(PasswordResetForm):
+    def send_mail(self, *args, **kwargs):
+        try:
+            return super().send_mail(*args, **kwargs)
+        except (SMTPException, OSError):
+            logging.getLogger(__name__).warning(
+                "Password reset delivery unavailable; check mail provider configuration"
+            )
+
+
+class LimitedPasswordReset(PasswordResetView):
+    form_class = SafePasswordResetForm
+
+    def post(self, request, *args, **kwargs):
+        if not consume_limit("reset:" + request.META.get("REMOTE_ADDR", ""), limit=5):
+            return HttpResponse("محاولات كثيرة. يرجى المحاولة لاحقاً.", status=429)
+        return super().post(request, *args, **kwargs)
 
 
 class EmailAuthenticationForm(AuthenticationForm):
@@ -34,12 +62,11 @@ class SecureLogin(LoginView):
     authentication_form = EmailAuthenticationForm
 
     def post(self, request, *a, **kw):
-        self.key = "login:" + request.META.get("REMOTE_ADDR", "")
-        if cache.get(self.key, 0) >= 10:
+        identity = "login:" + request.META.get("REMOTE_ADDR", "")
+        if not consume_limit(identity):
             return HttpResponse(
                 "محاولات كثيرة. يرجى المحاولة بعد 15 دقيقة.", status=429
             )
-        cache.set(self.key, cache.get(self.key, 0) + 1, 900)
         return super().post(request, *a, **kw)
 
     def form_valid(self, form):
@@ -48,7 +75,6 @@ class SecureLogin(LoginView):
         except PermissionDenied:
             form.add_error(None, "الحساب غير مفعل أو لم يتم التحقق منه")
             return self.form_invalid(form)
-        cache.delete(self.key)
         return super().form_valid(form)
 
 
@@ -87,9 +113,39 @@ def home(request):
             "upcoming_count": q.filter(
                 status="approved", date__gte=timezone.localdate()
             ).count(),
-            "case_count": Case.objects.exclude(status__in=["تم الحل", "مغلق"]).count()
+            "case_count": (
+                Case.objects.all()
+                if p.role == "coordinator"
+                else Case.objects.filter(assigned=request.user)
+            )
+            .exclude(status__in=["تم الحل", "مغلق"])
+            .count()
             if allowed(request.user, "cases")
             else 0,
+            "changes_waiting": q.filter(status="changes")[:5],
+            "late_letters": Letter.objects.filter(
+                activity__in=q, follow_up__lt=timezone.localdate()
+            ).exclude(status="مغلق")[:5]
+            if allowed(request.user, "letters")
+            else [],
+            "late_tasks": (
+                Task.objects.all()
+                if p.role == "coordinator"
+                else Task.objects.filter(assigned=request.user)
+            )
+            .filter(due__lt=timezone.localdate())
+            .exclude(status="مكتملة")[:5]
+            if allowed(request.user, "operations")
+            else [],
+            "case_followups": (
+                Case.objects.all()
+                if p.role == "coordinator"
+                else Case.objects.filter(assigned=request.user)
+            )
+            .filter(follow_up__lte=timezone.localdate())
+            .exclude(status__in=["تم الحل", "مغلق"])[:5]
+            if allowed(request.user, "cases")
+            else [],
             "upcoming": q.filter(
                 status="approved", date__gte=timezone.localdate()
             ).order_by("date")[:5],
@@ -109,6 +165,8 @@ def request_list(request):
     if request.GET.get("kind"):
         q = q.filter(kind=request.GET["kind"])
     if request.GET.get("club"):
+        if not request.GET["club"].isdigit():
+            return HttpResponse("عامل تصفية غير صالح", status=400)
         q = q.filter(club_id=request.GET["club"])
     return render(
         request,
@@ -125,6 +183,30 @@ def edit_activity(request, kind="event", pk=None):
         raise PermissionDenied
     if p.role != "club":
         raise PermissionDenied
+    if not pk and request.method == "POST" and request.POST.get("draft_token"):
+        try:
+            token = signing.loads(
+                request.POST["draft_token"], salt="etcs-draft", max_age=86400
+            )
+        except signing.BadSignature:
+            raise PermissionDenied
+        if (
+            token.get("user") != request.user.pk
+            or token.get("club") != p.club_id
+            or token.get("kind") != kind
+        ):
+            raise PermissionDenied
+        # A stable, signed draft ID makes retry/autosave/manual-submit requests idempotent.
+        stored, _ = Activity.objects.get_or_create(
+            pk=token["id"],
+            defaults={
+                "club": p.club,
+                "creator": request.user,
+                "kind": kind,
+                "title": "",
+            },
+        )
+        pk = stored.pk
     a = (
         get_object_or_404(activities(request.user).select_for_update(), pk=pk)
         if pk
@@ -156,6 +238,7 @@ def edit_activity(request, kind="event", pk=None):
                 ("برنامج الفعالية", "program", Programs),
                 ("المتحدثون والضيوف", "speakers", Speakers),
                 ("الشراكات", "partners", Partners),
+                ("مواعيد إضافية للفعالية", "extra_dates", ExtraDates),
             ]
         ]
         if kind == "event"
@@ -199,8 +282,18 @@ def edit_activity(request, kind="event", pk=None):
                     for x in fs.cleaned_data
                     if x and not x.get("DELETE")
                 ]
+            d = json.loads(json.dumps(d, default=str, ensure_ascii=False))
             a.details = d
             a.save()
+            if kind == "event":
+                a.event_dates.all().delete()
+                for row in d.get("extra_dates", []):
+                    EventDate.objects.create(activity=a, **row)
+            else:
+                a.workshop_sessions.all().delete()
+                for row in d.get("sessions", []):
+                    WorkshopSession.objects.create(activity=a, **row)
+
             audit(request.user, "save_draft", a.pk)
             if request.POST.get("autosave"):
                 return JsonResponse(
@@ -222,6 +315,15 @@ def edit_activity(request, kind="event", pk=None):
             "kind": kind,
             "activity": a if a.pk and not a._state.adding else None,
             "extras": extras,
+            "draft_token": signing.dumps(
+                {
+                    "id": str(a.pk),
+                    "user": request.user.pk,
+                    "club": p.club_id,
+                    "kind": kind,
+                },
+                salt="etcs-draft",
+            ),
         },
     )
 
@@ -229,19 +331,9 @@ def edit_activity(request, kind="event", pk=None):
 @login_required
 def activity(request, pk):
     a = get_object_or_404(activities(request.user), pk=pk)
-    conflicts = (
-        Activity.objects.filter(
-            status="approved",
-            date=a.date,
-            start__lt=a.end,
-            end__gt=a.start,
-            venue=a.venue,
-        )
-        .exclude(pk=a.pk)
-        .exists()
-        if a.date and a.start and a.end and a.kind == "event"
-        else False
-    )
+    from .scheduling import has_conflicts
+
+    conflicts = has_conflicts(a)
     # Conflict existence only; never expose another club's private request.
     return render(
         request,
@@ -253,7 +345,14 @@ def activity(request, pk):
                 (DETAIL_FIELDS.get(k, k), v)
                 for k, v in a.details.items()
                 if k
-                not in ["requirements", "sessions", "program", "speakers", "partners"]
+                not in [
+                    "requirements",
+                    "sessions",
+                    "program",
+                    "speakers",
+                    "partners",
+                    "extra_dates",
+                ]
                 and v
             ],
             "requirements": a.details.get("requirements", []),
@@ -264,6 +363,7 @@ def activity(request, pk):
                     ("برنامج الفعالية", "program"),
                     ("المتحدثون والضيوف", "speakers"),
                     ("الشراكات", "partners"),
+                    ("المواعيد الإضافية", "extra_dates"),
                 ]
             ],
         },
@@ -296,57 +396,60 @@ def upload(request, pk):
     if p.role != "club" or a.status not in ["draft", "changes", "approved"]:
         raise PermissionDenied
     f = request.FILES.get("file")
-    extensions = {
-        ".pdf": b"%PDF-",
-        ".png": b"\x89PNG\r\n\x1a\n",
-        ".jpg": b"\xff\xd8\xff",
-        ".jpeg": b"\xff\xd8\xff",
-        ".docx": b"PK\x03\x04",
-        ".xlsx": b"PK\x03\x04",
-    }
-    ext = Path(f.name).suffix.lower() if f else ""
-    if (
-        not f
-        or f.size > 10 * 1024 * 1024
-        or ext not in extensions
-        or not f.read(8).startswith(extensions.get(ext, b"INVALID"))
-    ):
-        messages.error(
-            request, "ملف غير صالح: PDF، PNG، JPG، DOCX، XLSX حتى 10 ميغابايت"
-        )
+    try:
+        original, checksum = validate_document(f)
+    except ValidationError as error:
+        messages.error(request, "؛ ".join(error.messages))
         return redirect("activity", pk)
-    f.seek(0)
-    if ext in {".docx", ".xlsx"}:
-        import zipfile
-
-        try:
-            with zipfile.ZipFile(f) as z:
-                if (
-                    len(z.infolist()) > 1000
-                    or sum(i.file_size for i in z.infolist()) > 50 * 1024 * 1024
-                    or "[Content_Types].xml" not in z.namelist()
-                    or not any(
-                        n.startswith("word/" if ext == ".docx" else "xl/")
-                        for n in z.namelist()
-                    )
-                ):
-                    raise ValueError
-        except (zipfile.BadZipFile, ValueError):
-            messages.error(request, "مستند Office غير صالح")
-            return redirect("activity", pk)
-        f.seek(0)
-    original = Path(f.name).name[:200]
-    f.name = str(__import__("uuid").uuid4()) + ext
-    Attachment.objects.create(activity=a, file=f, name=original, uploader=request.user)
+    with transaction.atomic():
+        previous = None
+        if request.POST.get("supersedes"):
+            if a.status == "approved":
+                raise PermissionDenied
+            try:
+                __import__("uuid").UUID(request.POST["supersedes"])
+            except ValueError:
+                return HttpResponse("مرجع الملف غير صالح", status=400)
+            previous = get_object_or_404(
+                Attachment.objects.select_for_update(),
+                pk=request.POST["supersedes"],
+                activity=a,
+                deleted=False,
+            )
+            if Attachment.objects.filter(supersedes=previous).exists():
+                messages.error(request, "تم رفع إصدار أحدث بالفعل؛ حدّث الصفحة")
+                return redirect("activity", pk)
+        Attachment.objects.create(
+            activity=a,
+            file=f,
+            name=original,
+            uploader=request.user,
+            checksum=checksum,
+            purpose=request.POST.get("purpose", "")[:100],
+            supersedes=previous,
+            version=previous.version + 1 if previous else 1,
+        )
     audit(request.user, "upload", a.pk, original)
     return redirect("activity", pk)
 
 
 @login_required
 def download(request, pk):
-    f = get_object_or_404(Attachment, pk=pk, activity__in=activities(request.user))
+    f = get_object_or_404(
+        Attachment, pk=pk, activity__in=activities(request.user), deleted=False
+    )
     audit(request.user, "download", f.pk)
-    response = FileResponse(f.file.open("rb"), as_attachment=True, filename=f.name)
+    preview = request.GET.get("preview") == "1" and Path(f.name).suffix.lower() in [
+        ".pdf",
+        ".png",
+        ".jpg",
+        ".jpeg",
+    ]
+    response = FileResponse(
+        f.file.open("rb"), as_attachment=not preview, filename=f.name
+    )
+    if preview:
+        response["Content-Security-Policy"] = "sandbox; default-src 'none'"
     response["X-Content-Type-Options"] = "nosniff"
     return response
 
@@ -354,7 +457,9 @@ def download(request, pk):
 @login_required
 @require_POST
 def delete_attachment(request, pk):
-    f = get_object_or_404(Attachment, pk=pk, activity__in=activities(request.user))
+    f = get_object_or_404(
+        Attachment, pk=pk, activity__in=activities(request.user), deleted=False
+    )
     if profile(request.user).role != "club" or f.activity.status not in [
         "draft",
         "changes",
@@ -362,8 +467,8 @@ def delete_attachment(request, pk):
         raise PermissionDenied
     a = f.activity_id
     audit(request.user, "delete_attachment", f.pk, f.name)
-    f.file.delete()
-    f.delete()
+    f.deleted = True
+    f.save(update_fields=["deleted"])
     return redirect("activity", a)
 
 
@@ -377,12 +482,29 @@ def report(request, pk):
     if request.method == "POST" and form.is_valid():
         r = form.save(commit=False)
         r.activity = a
+        previous_correction = r.correction_note
         r.correction_note = ""
         r.save()
         audit(request.user, "report", a.pk)
         from .services import notify
 
-        notify(a, "تم تقديم التقرير الختامي: " + a.title, True)
+        notify(
+            a,
+            "تم تقديم التقرير الختامي: " + a.title,
+            True,
+            actor=request.user,
+            event_key="report:"
+            + str(a.pk)
+            + ":"
+            + __import__("hashlib")
+            .sha256(
+                (
+                    json.dumps(form.cleaned_data, default=str, sort_keys=True)
+                    + previous_correction
+                ).encode()
+            )
+            .hexdigest(),
+        )
         return redirect("activity", a.pk)
     return render(
         request, "coordination/form.html", {"form": form, "title": "التقرير الختامي"}
@@ -419,6 +541,13 @@ def letter_edit(request, pk=None, activity_pk=None):
         else:
             letter.activity = a
             letter.save()
+            LetterHistory.objects.create(
+                letter=letter,
+                actor=request.user,
+                snapshot=json.loads(
+                    json.dumps(form.cleaned_data, default=str, ensure_ascii=False)
+                ),
+            )
             audit(
                 request.user,
                 "letter",
@@ -488,7 +617,11 @@ def records(request, module, pk=None):
     if module == "tasks" and p.role != "coordinator":
         q = q.filter(assigned=request.user)
     if module == "meetings" and p.role != "coordinator":
-        raise PermissionDenied
+        q = q.filter(
+            Q(creator=request.user)
+            | Q(club__in=p.clubs.all())
+            | Q(participants=request.user)
+        ).distinct()
     search = request.GET.get("q", "").strip()
     if search and module == "cases":
         q = q.filter(Q(subject__icontains=search) | Q(category__icontains=search))
@@ -498,21 +631,59 @@ def records(request, module, pk=None):
     previous_status = getattr(obj, "status", getattr(obj, "outcome", "")) if obj else ""
     if module == "ideas" and p.role != "club":
         klass = model_form(Idea, ("club",))
-    form = klass(request.POST or None, instance=obj)
+    form = klass(request.POST or None, request.FILES or None, instance=obj)
     if module == "tasks" and p.role != "coordinator":
         form.fields["assigned"].queryset = User.objects.filter(pk=request.user.pk)
         form.fields["club"].queryset = p.clubs.filter(active=True)
+    if module == "cases":
+        form.fields["assigned"].queryset = (
+            User.objects.filter(
+                is_active=True, profile__role__in=["coordinator", "deputy"]
+            )
+            if p.role == "coordinator"
+            else User.objects.filter(pk=request.user.pk)
+        )
+        form.fields["assigned"].initial = request.user.pk
+    if module == "meetings":
+        form.fields["club"].queryset = (
+            Club.objects.filter(active=True)
+            if p.role == "coordinator"
+            else p.clubs.filter(active=True)
+        )
+        if p.role != "coordinator":
+            form.fields["club"].required = True
+        form.fields["participants"].queryset = (
+            User.objects.filter(is_active=True)
+            if p.role == "coordinator"
+            else User.objects.filter(
+                Q(pk=request.user.pk) | Q(profile__club__in=p.clubs.all())
+            ).distinct()
+        )
     if module == "ideas" and p.role == "club" and obj and obj.outcome != "بحاجة لنقاش":
         raise PermissionDenied
     if request.method == "POST" and form.is_valid():
         item = form.save(commit=False)
-        if module == "cases" and not item.pk:
+        if module == "cases" and p.role != "coordinator":
             item.assigned = request.user
         if module == "ideas" and not item.pk:
             if p.role != "club":
                 raise PermissionDenied
             item.club = p.club
+        if module == "tasks":
+            assignee = getattr(item.assigned, "profile", None)
+            if assignee and assignee.role == "club":
+                if item.club_id and item.club_id != assignee.club_id:
+                    form.add_error("assigned", "المستخدم لا ينتمي للنادي المحدد")
+                    return render(
+                        request,
+                        "coordination/records.html",
+                        {"title": title, "form": form, "records": q, "module": module},
+                    )
+                item.club_id = assignee.club_id
+        if module == "meetings" and not item.pk:
+            item.creator = request.user
         item.save()
+        form.save_m2m()
         audit(
             request.user,
             "save_" + module,
@@ -522,7 +693,9 @@ def records(request, module, pk=None):
             + str(getattr(item, "status", getattr(item, "outcome", ""))),
         )
         if module == "tasks":
-            Notification.objects.create(user=item.assigned, text="مهمة: " + item.title)
+            Notification.objects.create(
+                user=item.assigned, text="مهمة: " + item.title, sender=request.user
+            )
         messages.success(request, "تم الحفظ")
         return redirect("records", module=module)
     return render(
@@ -539,6 +712,7 @@ def records(request, module, pk=None):
             if pk
             else [],
             "case_states": Case._meta.get_field("status").choices,
+            "case_documents": obj.documents.all() if module == "cases" and obj else [],
         },
     )
 
@@ -547,9 +721,9 @@ def records(request, module, pk=None):
 def calendar(request):
     profile(request.user)
     # Other clubs' calendar entries contain only explicitly approved public-safe fields.
-    q = Activity.objects.filter(status="approved").values(
-        "title", "date", "start", "end", "club__name", "kind"
-    )
+    from .scheduling import public_calendar
+
+    q = public_calendar()
     own = (
         activities(request.user)
         .exclude(status__in=["approved", "rejected", "cancelled", "completed", "draft"])
@@ -579,16 +753,34 @@ def calendar_export(request):
         "PRODID:-//ETCS//AR",
         "CALSCALE:GREGORIAN",
     ]
-    for a in Activity.objects.filter(status="approved", date__isnull=False):
+    from .scheduling import public_calendar
+
+    zone = ZoneInfo("Asia/Hebron")
+    for event in public_calendar():
+        if not event["date"]:
+            continue
         lines += [
             "BEGIN:VEVENT",
-            f"UID:{a.pk}@etcs",
+            f"UID:{escape(event['uid'])}@etcs",
             f"DTSTAMP:{timezone.now():%Y%m%dT%H%M%SZ}",
-            f"DTSTART;VALUE=DATE:{a.date:%Y%m%d}",
-            f"DTEND;VALUE=DATE:{a.date + timedelta(days=1):%Y%m%d}",
-            "SUMMARY:" + escape(a.title),
-            "END:VEVENT",
         ]
+        if event["start"] and event["end"]:
+            begin = datetime.combine(
+                event["date"], event["start"], tzinfo=zone
+            ).astimezone(ZoneInfo("UTC"))
+            finish = datetime.combine(
+                event["date"], event["end"], tzinfo=zone
+            ).astimezone(ZoneInfo("UTC"))
+            lines += [
+                f"DTSTART:{begin:%Y%m%dT%H%M%SZ}",
+                f"DTEND:{finish:%Y%m%dT%H%M%SZ}",
+            ]
+        else:
+            lines += [
+                f"DTSTART;VALUE=DATE:{event['date']:%Y%m%d}",
+                f"DTEND;VALUE=DATE:{event['date'] + timedelta(days=1):%Y%m%d}",
+            ]
+        lines += ["SUMMARY:" + escape(event["title"]), "END:VEVENT"]
     lines += ["END:VCALENDAR"]
     return HttpResponse(
         "\r\n".join(lines) + "\r\n",
@@ -673,7 +865,7 @@ def reports(request):
                 str(a.date or ""),
                 a.get_status_display(),
                 a.participants,
-                a.budget,
+                float(a.budget),
             ]
             sheet.append(
                 [
@@ -699,12 +891,22 @@ def reports(request):
             ).write_pdf(),
             content_type="application/pdf",
         )
+    submitted = dict(q.exclude(submitted__isnull=True).values_list("pk", "submitted"))
+    durations = [
+        (created - submitted[pk]).total_seconds() / 86400
+        for pk, created in History.objects.filter(
+            activity__in=q, status="approved"
+        ).values_list("activity_id", "created")
+        if pk in submitted
+    ]
+    average_days = sum(durations) / len(durations) if durations else None
     return render(
         request,
         "coordination/reports.html",
         {
             "rows": q,
             "archive": mode == "archive",
+            "average_days": average_days,
             "attendance": Report.objects.filter(activity__in=q).aggregate(
                 total=Sum("attendees")
             )["total"]
@@ -733,10 +935,20 @@ def invite(request):
             fields = ["email", "role", "club"]
             labels = {"email": "البريد الإلكتروني", "role": "الدور", "club": "النادي"}
 
+        def clean_email(self):
+            email = self.cleaned_data["email"].strip().lower()
+            if User.objects.filter(email__iexact=email).exists():
+                raise forms.ValidationError(
+                    "يوجد حساب لهذا البريد؛ حدّث حسابه من صفحة المستخدمين"
+                )
+            return email
+
         def clean(self):
             d = super().clean()
             if d.get("role") == "club" and not d.get("club"):
                 self.add_error("club", "اختر النادي")
+            if d.get("club") and not d["club"].active:
+                self.add_error("club", "النادي غير نشط")
             return d
 
     form = InviteForm(request.POST or None)
@@ -746,12 +958,24 @@ def invite(request):
         inv.expires = timezone.now() + timedelta(days=2)
         inv.save()
         link = request.build_absolute_uri(reverse("accept", args=[inv.token]))
-        send_mail(
-            "دعوة نظام تنسيق الكلية",
-            "للتحقق من بريدك وتعيين كلمة مرور الحساب: " + link,
-            None,
-            [inv.email],
-        )
+        try:
+            send_mail(
+                "دعوة نظام تنسيق الكلية",
+                "للتحقق من بريدك وتعيين كلمة مرور الحساب: " + link,
+                None,
+                [inv.email],
+            )
+        except (SMTPException, OSError):
+            inv.delete()
+            form.add_error(
+                None,
+                "تعذر إرسال الدعوة. تحقق من إعدادات مزود البريد قبل المحاولة مجدداً.",
+            )
+            return render(
+                request,
+                "coordination/form.html",
+                {"title": "دعوة مستخدم", "form": form},
+            )
         audit(request.user, "invite", inv.pk)
         from django.conf import settings
 
@@ -777,17 +1001,36 @@ def accept(request, token):
         expires__gt=timezone.now(),
     )
     user = User(username=inv.email, email=inv.email)
-    form = SetPasswordForm(user, request.POST or None)
+
+    class ActivationForm(SetPasswordForm):
+        first_name = forms.CharField(
+            label="الاسم الأول", required=False, max_length=150
+        )
+        last_name = forms.CharField(label="اسم العائلة", required=False, max_length=150)
+
+    form = ActivationForm(user, request.POST or None)
     if request.method == "POST" and form.is_valid():
         if User.objects.filter(username__iexact=inv.email).exists():
             form.add_error(None, "الحساب موجود بالفعل، يرجى التواصل مع المنسق")
         else:
             user = form.save()
+            user.first_name = form.cleaned_data.get("first_name", "")
+            user.last_name = form.cleaned_data.get("last_name", "")
+            user.save(update_fields=["first_name", "last_name"])
             Profile.objects.create(
                 user=user, role=inv.role, club=inv.club, verified=True
             )
             inv.used = True
             inv.save()
+            from django.conf import settings
+
+            if settings.ETCS_RLS:
+                from django.db import connection
+
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT set_config('etcs.user_id',%s,true)", [str(user.pk)]
+                    )
             audit(user, "accept_invitation", inv.pk)
             messages.success(request, "تم التحقق من البريد وتفعيل الحساب")
             return redirect("login")
@@ -814,7 +1057,12 @@ def accounts(request):
     return render(
         request,
         "coordination/accounts.html",
-        {"users": User.objects.select_related("profile").all()},
+        {
+            "users": User.objects.select_related("profile").all(),
+            "invitations": Invitation.objects.filter(
+                used=False, expires__gt=timezone.now()
+            ).order_by("-pk"),
+        },
     )
 
 
@@ -909,7 +1157,7 @@ def report_corrections(request, pk):
         audit(request.user, "report_corrections", a.pk, note)
         from .services import notify
 
-        notify(a, "مطلوب تصحيح التقرير الختامي: " + a.title)
+        notify(a, "مطلوب تصحيح التقرير الختامي: " + a.title, actor=request.user)
         messages.success(request, "تم طلب تصحيح التقرير")
     return redirect("activity", a.pk)
 
@@ -947,7 +1195,9 @@ def anonymize_case(request, pk):
     if profile(request.user).role != "coordinator":
         raise PermissionDenied
     case = get_object_or_404(Case, pk=pk, status="مغلق")
-    cutoff = timezone.now() - timedelta(days=365)
+    from django.conf import settings
+
+    cutoff = timezone.now() - timedelta(days=settings.ETCS_CASE_RETENTION_DAYS)
     if case.created > cutoff:
         messages.error(
             request, "تتاح إزالة البيانات الشخصية للقضايا المغلقة بعد سنة من إنشائها"
@@ -956,6 +1206,11 @@ def anonymize_case(request, pk):
         case.subject = "قضية مؤرشفة — أزيلت البيانات الشخصية"
         case.description = "أزيلت البيانات وفق سياسة الاحتفاظ"
         case.notes = ""
+        case.contact = ""
+        case.department = ""
+        for doc in case.documents.all():
+            doc.file.delete(save=False)
+            doc.delete()
         case.resolution = ""
         case.save()
         audit(request.user, "anonymize_case", case.pk)
@@ -1073,3 +1328,15 @@ def operations_report(request, kind):
         "coordination/operations_report.html",
         {"headers": headers, "rows": rows, "title": title},
     )
+
+
+def health(request):
+    from django.db import connection
+
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+    except Exception:
+        return JsonResponse({"status": "unavailable"}, status=503)
+    return JsonResponse({"status": "ok"})

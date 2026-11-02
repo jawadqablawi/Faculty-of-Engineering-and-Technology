@@ -1,26 +1,35 @@
-# ETCS architecture and permissions
+# Architecture and permissions
 
-Django 5.2 LTS, server-rendered Arabic RTL UI, SQLite relational database for single-instance operation, private filesystem storage. Django ORM migrations enforce foreign keys. UUID primary keys and unique human-readable tracking IDs prevent collisions. PostgreSQL RLS is not implemented: authorization is enforced on every application query. Multi-instance PostgreSQL deployment requires a separate tested database configuration.
+Django 5.2 LTS renders Arabic RTL HTML. Relational tables persist users/profiles, clubs, activities, physical dates, workshop sessions, attachments and immutable versions, approval requirements, snapshots, comments, letters/history, cases/documents, plans, meetings/participants, tasks, reports, notifications, email queue, audit records, counters and settings. Optional descriptive program/speaker/partner/requirements rows are validated formsets stored as structured activity JSON; primary dates/sessions and operational entities have relational constraints.
 
-## Navigation
-Club: physical request, online request, own requests, calendar. Coordinator: requests, activities/calendar, letters linked to requests, student affairs, clubs. Secondary navigation exposes tasks, meetings, ideas, reports, accounts.
+## Authorization matrix
 
-## Matrix
 | Role | Requests/files | Approvals | Cases | Operations | Reports | Accounts |
 |---|---|---|---|---|---|---|
 | Coordinator | All | All recorded stages | All | All | All | Invite/deactivate/delegate |
-| Deputy | Explicit club scope + requests module | Same scope + requests module | cases module, assigned only | operations module, assigned tasks only; meetings coordinator only | reports module, explicit club scope | None |
-| Club | Own active membership only | Submit/withdraw only | None | Own ideas | Own request history | None |
+| Deputy | Explicit club scope and module | requests module and scope | cases module, assigned only | operations module; assigned tasks and scoped meetings | reports module, explicit scope | None |
+| Club | Own active membership only | Submit/withdraw | None | Own ideas/plans/meetings and assigned tasks | Own request history | None |
 | Reviewer | Explicit clubs, requests module, read only | None | None | None | None | None |
-| Auditor | Explicit activity record grants, reports module, read only | None | None | None | Authorized reports | None |
+| Auditor | Explicit activity grants, reports module, read only | None | None | None | Granted records only | None |
 
-There is no implicit all-club access for an empty deputy scope. Partner mentions confer no permissions. Calendar exposes only approved title, club, kind, date and times across clubs. Files are never served via public media routes. Disabled users lose authenticated access immediately.
+Server queries derive club ownership from the authenticated membership, never a submitted arbitrary club ID. All UUID URL/file lookups are scoped. A partner mention grants no access. Calendar projections expose only approved titles, dates, times, kind and club, without budgets, private notes, links or documents. Account/club deactivation is checked on every request.
 
-## Data model
-Club → Profile (current membership) → Activity (physical/online) → History snapshots, Attachment, Letter, Report. Other entities: Idea, Case, Meeting, Task, Notification, Audit, Invitation, Setting. Structured dynamic requirements and online sessions are stored as validated JSON within the activity; other optional detail sections are text. Every activity foreign key preserves ownership, with protected deletion. Historical records survive president replacement.
+## PostgreSQL RLS
 
-## Workflow
-Draft/changes → review → preliminary → council → approvals → approved → completed. Forwarding requires a letter and evidence reference. Council and university acceptance each require a recorded reference. Completion requires a final report. Changes/rejection require reasons. Every transition is atomic, recorded with actor/time/snapshot and notifies relevant users. Approval evidence references are operator attestations, not verification by the university.
+SQLite development uses the same server-side authorization but has no RLS. PostgreSQL migrations enable and FORCE RLS on private activity/child rows, cases/documents, letters/history, plans, ideas, meetings, tasks, notifications, email queue and audit records. The web login must be a non-superuser without BYPASSRLS and cannot own tables. Middleware rejects bypass roles, wraps the request in a transaction and sets `etcs.user_id` transaction-locally, preventing pool identity leakage. Without identity, private activity reads return no rows.
 
-## Authentication
-Django password hashing/validation, CSRF, expiring HttpOnly sessions, invite-only accounts, one-time expiring invitation links that verify possession of the email, Django password-reset tokens. No public registration. Initial coordinator uses a local interactive command. Production must use HTTPS and a real SMTP provider. Login rate limiting uses Django's process-local cache; use a shared rate-limit/cache service before multiworker production.
+SECURITY DEFINER helper functions have a fixed search path and trusted migration owner. A narrow security-barrier calendar view projects only approved public-safe fields; the conflict function returns a boolean. The maintenance credential is used for migrations, backup and trusted scheduled jobs, never by HTTP workers. RLS supplements trusted application authorization and parameterized queries; web credentials and request context must remain server-side. It is not a defense against a fully compromised trusted application server. `grant_web_role` revokes update/delete on audit, approval snapshots and correspondence history. No ordinary application endpoint modifies or deletes audit history.
+
+## Workflow and evidence
+
+Draft/changes → review → preliminary → council → approvals → approved → completed. The system uses atomic transitions, a locked annual sequence for identifiers, immutable submitted snapshots (including file checksums/versions), reasons and actor/time. Forwarding requires a letter and recorded reference. Council/university decisions are separate. Required additional approvals must all be accepted before final approval; a failure rolls back the whole transition. Completion requires a final report without outstanding corrections. Letters preserve successive bodies, status, dates and evidence. Recorded references are authorized operator attestations, not university verification or electronic signatures.
+
+## Authentication and documents
+
+Django password validation/hashing, invitation-only creation, expiring one-time email links, password reset, HttpOnly expiring sessions, CSRF and persistent database rate limits. Production requires a strong secret and explicit allowed hosts; HTTPS cookies and redirect are enabled. Caddy owns public ports and sanitizes protocol headers; web/database have no public host ports.
+
+Private files have random storage names, size/type/signature checks and Office archive limits. Authorized endpoints stream files; no media root is published. Each replacement links to a prior immutable file, with version and SHA-256 checksum. Draft deletion is a soft deletion; physical case documents are removed during approved retention anonymization. Optional email delivery is queued and retried without rolling back activity changes; console output is never recorded as actual notification delivery.
+
+## Operations
+
+Gunicorn runs multiple workers. Login/reset limits are in the database rather than process memory. Reminder keys deduplicate each recipient/item/day; queues skip inactive recipients. Private media and PostgreSQL are persistent volumes. The backup command uses SQLite online backup or pg_dump plus media copying; pause writes/uploads for cross-resource consistency. Production deployment requires tested recovery, a real SMTP provider and correct domain DNS/HTTPS; these external services are not provisioned by repository files.

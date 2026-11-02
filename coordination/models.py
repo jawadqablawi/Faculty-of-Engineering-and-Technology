@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator
@@ -11,6 +12,7 @@ class Club(models.Model):
     president = models.CharField(max_length=150, blank=True)
     vice_president = models.CharField(max_length=150, blank=True)
     committee = models.TextField(blank=True)
+    logo = models.ImageField(upload_to="club-logos/", blank=True)
 
     def __str__(self):
         return self.name
@@ -108,7 +110,7 @@ class Activity(models.Model):
     @property
     def budget(self):
         return sum(
-            float(x.get("quantity", 0)) * float(x.get("price", 0))
+            Decimal(str(x.get("quantity", 0))) * Decimal(str(x.get("price", 0)))
             for x in self.details.get("requirements", [])
         )
 
@@ -136,6 +138,17 @@ class Attachment(models.Model):
     file = models.FileField(upload_to="documents/%Y/%m/")
     name = models.CharField(max_length=200)
     uploader = models.ForeignKey(User, on_delete=models.PROTECT)
+    supersedes = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="next_version",
+    )
+    version = models.PositiveIntegerField(default=1)
+    checksum = models.CharField(max_length=64, blank=True)
+    purpose = models.CharField(max_length=100, blank=True)
+    deleted = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
 
 
@@ -167,6 +180,8 @@ class Letter(models.Model):
     )
     evidence = models.TextField(blank=True)
     follow_up = models.DateField(null=True, blank=True)
+    submitted_date = models.DateField(null=True, blank=True)
+    response_date = models.DateField(null=True, blank=True)
     created = models.DateTimeField(auto_now_add=True)
 
     @property
@@ -175,8 +190,25 @@ class Letter(models.Model):
 
 
 class Case(models.Model):
+    contact = models.CharField(max_length=200, blank=True)
+    department = models.CharField(max_length=150, blank=True)
     subject = models.CharField(max_length=200)
-    category = models.CharField(max_length=100)
+    category = models.CharField(
+        max_length=100,
+        choices=[
+            (x, x)
+            for x in [
+                "أكاديمية",
+                "تعارض امتحانات",
+                "تسجيل مساقات",
+                "مختبرات",
+                "مرافق الجامعة",
+                "شكاوى",
+                "اقتراحات",
+                "عامة",
+            ]
+        ],
+    )
     description = models.TextField()
     priority = models.CharField(
         max_length=20,
@@ -222,8 +254,29 @@ class Task(models.Model):
     )
     notes = models.TextField(blank=True)
 
+    @property
+    def display_status(self):
+        from django.utils import timezone
+
+        return (
+            "متأخرة"
+            if self.status != "مكتملة" and self.due < timezone.localdate()
+            else self.status
+        )
+
 
 class Meeting(models.Model):
+    club = models.ForeignKey(Club, on_delete=models.PROTECT, null=True, blank=True)
+    creator = models.ForeignKey(
+        User,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="organized_meetings",
+    )
+    participants = models.ManyToManyField(
+        User, blank=True, related_name="coordination_meetings"
+    )
     title = models.CharField(max_length=200)
     date = models.DateTimeField()
     attendees = models.TextField()
@@ -273,6 +326,13 @@ class Report(models.Model):
 
 
 class Notification(models.Model):
+    sender = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sent_coordination_notifications",
+    )
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     text = models.CharField(max_length=250)
     activity = models.ForeignKey(
@@ -303,3 +363,159 @@ class Invitation(models.Model):
 class Setting(models.Model):
     key = models.CharField(max_length=80, unique=True)
     value = models.JSONField(default=dict)
+
+
+class EventDate(models.Model):
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="event_dates"
+    )
+    date = models.DateField()
+    start = models.TimeField()
+    end = models.TimeField()
+    venue = models.CharField(max_length=180)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(end__gt=models.F("start")),
+                name="event_date_end_after_start",
+            )
+        ]
+
+
+class WorkshopSession(models.Model):
+    activity = models.ForeignKey(
+        Activity, on_delete=models.CASCADE, related_name="workshop_sessions"
+    )
+    title = models.CharField(max_length=150)
+    date = models.DateField()
+    start = models.TimeField()
+    end = models.TimeField()
+    presenter = models.CharField(max_length=150, blank=True)
+    topic = models.CharField(max_length=300, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(end__gt=models.F("start")),
+                name="workshop_session_end_after_start",
+            )
+        ]
+
+
+class Publication(models.Model):
+    activity = models.ForeignKey(
+        Activity, on_delete=models.PROTECT, related_name="publications"
+    )
+    title = models.CharField(max_length=180)
+    scheduled = models.DateTimeField()
+    channel = models.CharField(max_length=100)
+    responsible = models.CharField(max_length=150, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ("draft", "مسودة"),
+            ("review", "بانتظار المراجعة"),
+            ("scheduled", "مجدول"),
+            ("published", "تم النشر"),
+            ("cancelled", "ملغي"),
+        ],
+        default="draft",
+    )
+    evidence = models.URLField(blank=True)
+    notes = models.TextField(blank=True)
+
+
+class ApprovalRequirement(models.Model):
+    activity = models.ForeignKey(
+        Activity, on_delete=models.PROTECT, related_name="approval_requirements"
+    )
+    office = models.CharField(max_length=150)
+    required = models.BooleanField(default=True)
+    decision = models.CharField(
+        max_length=20,
+        choices=[
+            ("pending", "بانتظار القرار"),
+            ("approved", "موافق"),
+            ("rejected", "مرفوض"),
+        ],
+        default="pending",
+    )
+    evidence = models.TextField(blank=True)
+    actor = models.ForeignKey(User, on_delete=models.PROTECT, null=True, blank=True)
+    decided = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "office"], name="unique_activity_approval_office"
+            )
+        ]
+
+
+class LetterHistory(models.Model):
+    letter = models.ForeignKey(Letter, on_delete=models.PROTECT, related_name="history")
+    actor = models.ForeignKey(User, on_delete=models.PROTECT)
+    snapshot = models.JSONField(default=dict)
+    created = models.DateTimeField(auto_now_add=True)
+
+
+class ActivityComment(models.Model):
+    activity = models.ForeignKey(
+        Activity, on_delete=models.PROTECT, related_name="comments"
+    )
+    actor = models.ForeignKey(User, on_delete=models.PROTECT)
+    text = models.TextField(max_length=4000)
+    created = models.DateTimeField(auto_now_add=True)
+
+
+class CaseDocument(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    case = models.ForeignKey(Case, on_delete=models.PROTECT, related_name="documents")
+    file = models.FileField(upload_to="case-documents/%Y/%m/")
+    name = models.CharField(max_length=200)
+    uploader = models.ForeignKey(User, on_delete=models.PROTECT)
+    created = models.DateTimeField(auto_now_add=True)
+
+
+class ClubPlan(models.Model):
+    club = models.ForeignKey(Club, on_delete=models.PROTECT, related_name="plans")
+    month = models.DateField()
+    title = models.CharField(max_length=200)
+    objectives = models.TextField()
+    activities = models.TextField()
+    notes = models.TextField(blank=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["club", "month"], name="club_monthly_plan")
+        ]
+
+
+class RateLimit(models.Model):
+    key = models.CharField(max_length=64, unique=True)
+    attempts = models.PositiveIntegerField(default=0)
+    expires = models.DateTimeField()
+
+
+class NumberSequence(models.Model):
+    prefix = models.CharField(max_length=5)
+    year = models.PositiveIntegerField()
+    value = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["prefix", "year"], name="unique_document_sequence"
+            )
+        ]
+
+
+class EmailDelivery(models.Model):
+    notification = models.OneToOneField(
+        Notification, on_delete=models.CASCADE, related_name="email_delivery"
+    )
+    attempts = models.PositiveIntegerField(default=0)
+    last_attempt = models.DateTimeField(null=True, blank=True)
+    sent = models.DateTimeField(null=True, blank=True)

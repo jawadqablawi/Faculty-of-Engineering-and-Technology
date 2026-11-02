@@ -1,0 +1,97 @@
+x-app-env: &app-env
+  ETCS_DEBUG: '0'
+  ETCS_SECRET_KEY: ${ETCS_SECRET_KEY:?Run prepare_deploy.py}
+  ETCS_ALLOWED_HOSTS: ${ETCS_ALLOWED_HOSTS:?Set allowed hosts}
+  ETCS_TRUSTED_ORIGINS: ${ETCS_TRUSTED_ORIGINS:-}
+  ETCS_PRIVATE_MEDIA: /data/private_media
+  ETCS_EMAIL_BACKEND: ${ETCS_EMAIL_BACKEND:-django.core.mail.backends.smtp.EmailBackend}
+  ETCS_EMAIL_HOST: ${ETCS_EMAIL_HOST:-}
+  ETCS_EMAIL_PORT: ${ETCS_EMAIL_PORT:-587}
+  ETCS_EMAIL_USER: ${ETCS_EMAIL_USER:-}
+  ETCS_EMAIL_PASSWORD: ${ETCS_EMAIL_PASSWORD:-}
+  ETCS_FROM_EMAIL: ${ETCS_FROM_EMAIL:-}
+  ETCS_EMAIL_NOTIFICATIONS: ${ETCS_EMAIL_NOTIFICATIONS:-0}
+  NO_PROXY: localhost,127.0.0.1,database,web
+
+x-common: &common
+  image: etcs:local
+  build: .
+  restart: unless-stopped
+  volumes:
+    - private_media:/data/private_media
+  depends_on:
+    database:
+      condition: service_healthy
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  database:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: etcs_maintenance
+      POSTGRES_DB: etcs
+      POSTGRES_PASSWORD: ${ETCS_DB_PASSWORD:?Run prepare_deploy.py}
+      ETCS_WEB_DB_PASSWORD: ${ETCS_WEB_DB_PASSWORD:?Run prepare_deploy.py}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/init-db.sh:/docker-entrypoint-initdb.d/10-etcs.sh:ro
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U etcs_maintenance -d etcs']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  migrate:
+    <<: *common
+    restart: 'no'
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql://etcs_maintenance:${ETCS_DB_PASSWORD}@database:5432/etcs?sslmode=disable
+      ETCS_RLS: '0'
+    command: [sh, -c, 'python manage.py migrate --noinput && python manage.py bootstrap && python manage.py grant_web_role etcs_web']
+  web:
+    <<: *common
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql://etcs_web:${ETCS_WEB_DB_PASSWORD}@database:5432/etcs?sslmode=disable
+      ETCS_RLS: '1'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/', timeout=4)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+  reminders:
+    <<: *common
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql://etcs_maintenance:${ETCS_DB_PASSWORD}@database:5432/etcs?sslmode=disable
+      ETCS_RLS: '0'
+    command: [python, manage.py, runreminders]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      ETCS_DOMAIN: ${ETCS_DOMAIN:?Set your domain}
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  private_media:
+  caddy_data:
+  caddy_config:

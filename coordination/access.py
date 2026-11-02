@@ -39,7 +39,11 @@ def activities(user):
     q = Activity.objects.select_related("club", "creator")
     if p.role == "club":
         return q.filter(club=p.club)
-    if not allowed(user, "requests") and not allowed(user, "reports"):
+    if (
+        not allowed(user, "requests")
+        and not allowed(user, "reports")
+        and not allowed(user, "letters")
+    ):
         return q.none()
     if p.role == "coordinator":
         return q

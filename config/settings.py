@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse, parse_qs
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -10,6 +11,13 @@ if not SECRET_KEY:
             "Set ETCS_SECRET_KEY; use ETCS_DEBUG=1 only for local development"
         )
     SECRET_KEY = "local-development-only-do-not-deploy"
+if not DEBUG:
+    if len(SECRET_KEY) < 50:
+        raise RuntimeError(
+            "Production ETCS_SECRET_KEY must contain at least 50 characters"
+        )
+    if not os.environ.get("ETCS_ALLOWED_HOSTS"):
+        raise RuntimeError("Set explicit ETCS_ALLOWED_HOSTS for production")
 ALLOWED_HOSTS = os.environ.get(
     "ETCS_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver"
 ).split(",")
@@ -20,10 +28,11 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "coordination",
+    "coordination.apps.CoordinationConfig",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -82,7 +91,10 @@ SECURE_SSL_REDIRECT = not DEBUG
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 X_FRAME_OPTIONS = "DENY"
 EMAIL_BACKEND = os.environ.get(
-    "ETCS_EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+    "ETCS_EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend"
+    if DEBUG
+    else "django.core.mail.backends.smtp.EmailBackend",
 )
 EMAIL_HOST = os.environ.get("ETCS_EMAIL_HOST", "")
 EMAIL_PORT = int(os.environ.get("ETCS_EMAIL_PORT", "587"))
@@ -94,3 +106,57 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 12582912
 
 SECURE_HSTS_SECONDS = int(os.environ.get("ETCS_HSTS_SECONDS", "0" if DEBUG else "3600"))
+
+# PostgreSQL is selected explicitly; SQLite remains supported for local development.
+if os.environ.get("DATABASE_URL"):
+    db = urlparse(os.environ["DATABASE_URL"])
+    if db.scheme not in ["postgres", "postgresql"]:
+        raise RuntimeError("DATABASE_URL must use PostgreSQL")
+    from urllib.parse import unquote
+
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": unquote(db.path.lstrip("/")),
+            "USER": unquote(db.username or ""),
+            "PASSWORD": unquote(db.password or ""),
+            "HOST": db.hostname,
+            "PORT": db.port or 5432,
+            "CONN_MAX_AGE": 60,
+            "OPTIONS": {"sslmode": parse_qs(db.query).get("sslmode", ["require"])[0]},
+        }
+    }
+CSRF_TRUSTED_ORIGINS = [
+    x for x in os.environ.get("ETCS_TRUSTED_ORIGINS", "").split(",") if x
+]
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    },
+}
+ETCS_RLS = os.environ.get("ETCS_RLS", "0") == "1"
+if ETCS_RLS:
+    if DATABASES["default"]["ENGINE"] != "django.db.backends.postgresql":
+        raise RuntimeError("ETCS_RLS requires PostgreSQL")
+    MIDDLEWARE.insert(
+        MIDDLEWARE.index("django.contrib.auth.middleware.AuthenticationMiddleware") + 1,
+        "coordination.middleware.DatabaseIdentityMiddleware",
+    )
+EMAIL_TIMEOUT = 15
+EMAIL_USE_TLS = os.environ.get("ETCS_EMAIL_TLS", "1") == "1"
+EMAIL_USE_SSL = os.environ.get("ETCS_EMAIL_SSL", "0") == "1"
+if EMAIL_USE_SSL:
+    EMAIL_USE_TLS = False
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get("ETCS_HSTS_SUBDOMAINS", "0") == "1"
+SECURE_HSTS_PRELOAD = os.environ.get("ETCS_HSTS_PRELOAD", "0") == "1"
+FILE_UPLOAD_PERMISSIONS = 0o600
+FILE_UPLOAD_DIRECTORY_PERMISSIONS = 0o700
+
+SECURE_REDIRECT_EXEMPT = [r"^healthz/$"]
+
+ETCS_EMAIL_NOTIFICATIONS = os.environ.get("ETCS_EMAIL_NOTIFICATIONS", "0") == "1"
+
+ETCS_CASE_RETENTION_DAYS = max(
+    1, int(os.environ.get("ETCS_CASE_RETENTION_DAYS", "365"))
+)
