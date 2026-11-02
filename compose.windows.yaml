@@ -1,0 +1,38 @@
+# Local preview on your own Windows computer. No paid hosting or public ports.
+services:
+  web:
+    image: etcs-windows:local
+    build: .
+    environment:
+      ETCS_DEBUG: '1'
+      ETCS_ALLOWED_HOSTS: localhost,127.0.0.1
+      ETCS_DB: /data/db.sqlite3
+      ETCS_PRIVATE_MEDIA: /data/private_media
+      ETCS_EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+      NO_PROXY: localhost,127.0.0.1
+    ports:
+      - '127.0.0.1:${ETCS_LOCAL_PORT:-8000}:8000'
+    volumes:
+      - local_data:/data
+    command: [sh, -c, 'python manage.py migrate --noinput && python manage.py bootstrap && gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 1 --timeout 90']
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz/',timeout=4)"]
+      interval: 5s
+      timeout: 5s
+      start_period: 15s
+      retries: 20
+  reminders:
+    image: etcs-windows:local
+    environment:
+      ETCS_DEBUG: '1'
+      ETCS_DB: /data/db.sqlite3
+      ETCS_PRIVATE_MEDIA: /data/private_media
+      ETCS_EMAIL_BACKEND: django.core.mail.backends.console.EmailBackend
+    volumes:
+      - local_data:/data
+    depends_on:
+      web:
+        condition: service_healthy
+    command: [python, manage.py, runreminders]
+volumes:
+  local_data:

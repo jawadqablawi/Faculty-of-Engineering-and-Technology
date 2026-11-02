@@ -355,3 +355,27 @@ class CompletionTests(TestCase):
         self.assertFalse(
             Invitation.objects.filter(email="not-sent@example.test").exists()
         )
+
+    def test_windows_initial_account_is_unique_and_password_hashed(self):
+        from unittest.mock import patch
+        from io import StringIO
+        from .models import Profile
+
+        Profile.objects.filter(role="coordinator").update(role="deputy")
+        with (
+            patch("builtins.input", return_value="windows-owner@example.test"),
+            patch(
+                "coordination.management.commands.bootstrap.getpass.getpass",
+                return_value="Unique-Windows-owner-482!",
+            ),
+        ):
+            call_command("bootstrap", interactive=True, stdout=StringIO())
+        owner = Profile.objects.get(role="coordinator").user
+        self.assertTrue(owner.check_password("Unique-Windows-owner-482!"))
+        self.assertNotEqual(owner.password, "Unique-Windows-owner-482!")
+        with patch(
+            "builtins.input",
+            side_effect=AssertionError("Must not ask for a replacement account"),
+        ):
+            call_command("bootstrap", interactive=True, stdout=StringIO())
+        self.assertEqual(Profile.objects.filter(role="coordinator").count(), 1)
