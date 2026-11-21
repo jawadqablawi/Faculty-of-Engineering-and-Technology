@@ -1,12 +1,21 @@
+self.addEventListener("install", event => event.waitUntil(self.skipWaiting()));
+
 self.addEventListener("push", event => {
   let data;
   try { data = event.data.json(); } catch { return; }
-  event.waitUntil(self.registration.showNotification(data.title || "ETCS", {
-    body: data.body || "لديك تحديث في نظام التنسيق.",
-    tag: data.tag,
-    icon: "/static/coordination/pwa/icon-192.png",
-    data: {url: data.url},
-  }));
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(data.title || "ETCS", {
+      body: data.body || "لديك تحديث في نظام التنسيق.",
+      tag: data.tag,
+      icon: "/static/coordination/pwa/icon-192.png",
+      data: {url: data.url},
+    }),
+    self.clients.matchAll({type: "window", includeUncontrolled: true}).then(windows => {
+      for (const client of windows) {
+        client.postMessage({type: "etcs-request-changed", url: data.url, recipient: data.recipient});
+      }
+    }),
+  ]));
 });
 
 self.addEventListener("notificationclick", event => {

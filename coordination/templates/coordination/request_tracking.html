@@ -1,6 +1,12 @@
 {% load static tz %}
 <link rel="stylesheet" href="{% static 'coordination/css/request-workflow.css' %}">
-<section class="card request-tracking" aria-labelledby="tracking-title">
+<script src="{% static 'coordination/js/live-request.js' %}" defer></script>
+<section class="card request-tracking" aria-labelledby="tracking-title" data-live-request
+  data-revision="{{ tracking.revision }}" data-recipient="{{ user.pk }}">
+  <div class="message warning" data-live-warning hidden>
+    <p role="status">وصل تحديث للطلب. احفظ ما أدخلته أو حدّث الصفحة لعرض الحالة الجديدة.</p>
+    <button type="button" class="secondary" data-live-reload>عرض التحديث</button>
+  </div>
   <div class="section-heading">
     <h2 id="tracking-title">الحالة الحالية</h2>
     {% include 'coordination/status_badge.html' %}

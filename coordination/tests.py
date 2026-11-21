@@ -151,6 +151,18 @@ class WorkflowTests(TestCase):
         self.assertTrue(response.context["form"].errors.get("club"))
         self.assertFalse(User.objects.filter(email=email).exists())
 
+    def test_live_request_revision_is_scoped_and_changes_on_transition(self):
+        url = reverse("activity", args=[self.activity.pk])
+        self.client.force_login(self.a)
+        first = self.client.get(url, {"live": "1"})
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first["Cache-Control"], "private, no-store")
+        self.activity.status = "review"
+        self.activity.save()
+        self.assertNotEqual(first.json(), self.client.get(url, {"live": "1"}).json())
+        self.client.force_login(self.b)
+        self.assertEqual(self.client.get(url, {"live": "1"}).status_code, 404)
+
     def test_tracking_uses_actual_workflow_and_protects_decision_notes(self):
         reviewer = User.objects.create_user("reviewer@example.test")
         reviewer_profile = Profile.objects.create(

@@ -195,6 +195,7 @@ def tracking(activity, show_reason):
         if item.office not in {"مجلس الطلبة", "الجامعة", "شؤون الطلبة"}
     ]
     return {
+        "revision": activity.updated.isoformat(),
         "stages": rendered,
         "next_step": next_step,
         "owner": owner,

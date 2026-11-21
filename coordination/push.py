@@ -162,7 +162,9 @@ def send_push(user, title, body, url, tag, *, subscriptions):
                         "keys": {"p256dh": device.p256dh, "auth": device.auth},
                     },
                     data=json.dumps(
-                        dict(title=title, body=body, url=url, tag=tag),
+                        dict(
+                            title=title, body=body, url=url, tag=tag, recipient=user.pk
+                        ),
                         ensure_ascii=False,
                     ),
                     vapid_private_key=vapid,

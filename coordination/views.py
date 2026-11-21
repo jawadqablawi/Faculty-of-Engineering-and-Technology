@@ -329,6 +329,14 @@ def activity(request, pk):
     from .scheduling import has_conflicts
     from .request_tracking import tracking
 
+    if request.method == "GET" and request.GET.get("live") == "1":
+        revision = get_object_or_404(
+            activities(request.user).values_list("updated", flat=True), pk=pk
+        )
+        response = JsonResponse({"revision": revision.isoformat()})
+        response["Cache-Control"] = "private, no-store"
+        return response
+
     a = get_object_or_404(
         activities(request.user).prefetch_related("approval_requirements"), pk=pk
     )
