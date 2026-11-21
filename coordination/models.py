@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.validators import MinValueValidator
+from django.utils import timezone
 
 
 class Club(models.Model):
@@ -331,6 +332,7 @@ class Report(models.Model):
 
 
 class Notification(models.Model):
+    push_event = models.CharField(max_length=32, blank=True, default="", db_default="")
     sender = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -552,3 +554,31 @@ class CalendarEntry(models.Model):
     club_name = models.CharField(max_length=180)
     kind = models.CharField(max_length=10)
     venue_key = models.CharField(max_length=64, blank=True)
+
+
+class PushSubscription(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    endpoint = models.URLField(max_length=2048, unique=True)
+    p256dh = models.CharField(max_length=100)
+    auth = models.CharField(max_length=32)
+    user_agent = models.CharField(max_length=300, blank=True)
+    created = models.DateTimeField(auto_now_add=True)
+    last_success = models.DateTimeField(null=True, blank=True)
+    active = models.BooleanField(default=True)
+
+
+class PushPreference(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    enabled = models.BooleanField(default=True)
+    new_requests = models.BooleanField(default=True)
+    status_changes = models.BooleanField(default=True)
+    reminders = models.BooleanField(default=True)
+
+
+class PushDelivery(models.Model):
+    notification = models.OneToOneField(Notification, on_delete=models.CASCADE)
+    pending = models.JSONField(default=list)
+    initialized = models.BooleanField(default=False)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    outcome = models.CharField(max_length=30, default="pending")
+    next_attempt = models.DateTimeField(default=timezone.now, db_index=True)

@@ -5,6 +5,7 @@ from django.db import connection, transaction
 from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 from .models import Profile
+from .push import defer_immediate, schedule_retries
 
 
 @require_GET
@@ -24,6 +25,11 @@ def cron_reminders(request):
             cursor.execute(
                 "SELECT set_config('etcs.user_id',%s,true)", [str(owner.user_id)]
             )
-    call_command("reminders")
+    token = defer_immediate.set(True)
+    try:
+        call_command("reminders")
+    finally:
+        defer_immediate.reset(token)
+    schedule_retries()
     call_command("deliver_email")
     return JsonResponse({"status": "processed"})

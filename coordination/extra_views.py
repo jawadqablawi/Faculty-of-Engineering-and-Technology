@@ -58,6 +58,7 @@ def comment(request, pk):
             "تعليق جديد: " + activity.title,
             admins=p.role == "club",
             actor=request.user,
+            push_event="comment",
         )
     return redirect("activity", pk)
 

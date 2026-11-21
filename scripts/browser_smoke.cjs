@@ -130,10 +130,11 @@ async function smoke() {
     await page.locator('[data-notification-menu] summary').click();
     await page.getByText('إشعار اختباري ثانٍ').waitFor();
     const notificationURL = page.url();
+    const unreadBefore = Number(await page.locator('[data-unread-count]').textContent());
     await page.getByRole('button', { name: 'تحديد كمقروء', exact: true }).first().click();
     await page.getByText('تم تحديث حالة الإشعارات.').waitFor();
     assert.equal(page.url(), notificationURL);
-    assert.equal(await page.locator('[data-unread-count]').textContent(), '1');
+    assert.equal(Number(await page.locator('[data-unread-count]').textContent()), unreadBefore - 1);
     await page.getByRole('link', { name: 'عرض كل الإشعارات' }).click();
     await page.getByRole('heading', { name: 'الإشعارات' }).waitFor();
     await page.getByRole('button', { name: 'تحديد الكل كمقروء' }).click();
@@ -144,6 +145,13 @@ async function smoke() {
     await page.keyboard.press('Escape');
     await page.keyboard.press('/');
     assert(!(await page.locator('#workspace-search').evaluate(input => document.activeElement === input)));
+    await page.getByRole('main').getByRole('link', { name: 'إعدادات إشعارات الجوال' }).click();
+    await page.getByRole('heading', { name: 'إشعارات الجوال' }).waitFor();
+    await page.getByText(/إشعارات الجوال غير مهيّأة|المتصفح لا يدعم إشعارات الجوال|الإشعارات محظورة من المتصفح/).waitFor();
+    const workerPath = await page.evaluate(async () => new URL((await navigator.serviceWorker.ready).active.scriptURL).pathname);
+    assert.equal(workerPath, '/sw.js');
+    assert.equal(await page.locator('link[rel="manifest"]').getAttribute('href'), '/manifest.webmanifest');
+    await page.goBack();
     await page.emulateMedia({ media: 'print', reducedMotion: 'reduce' });
     assert(!(await page.locator('.site-header').isVisible()));
     assert(!(await page.locator('[data-notification-form]').first().isVisible()));

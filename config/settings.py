@@ -218,3 +218,7 @@ if ETCS_SERVERLESS:
     DATA_UPLOAD_MAX_MEMORY_SIZE = 4 * 1024 * 1024
     ETCS_PDF_BACKEND = "fpdf"
     MEDIA_ROOT = Path("/tmp/etcs-unused-media")
+
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
+VAPID_ADMIN_EMAIL = os.environ.get("VAPID_ADMIN_EMAIL", "").strip()

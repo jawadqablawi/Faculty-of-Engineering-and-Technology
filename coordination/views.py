@@ -534,6 +534,7 @@ def report(request, pk):
             "تم تقديم التقرير الختامي: " + a.title,
             True,
             actor=request.user,
+            push_event="report",
             event_key="report:"
             + str(a.pk)
             + ":"
@@ -580,6 +581,7 @@ def letter_edit(request, pk=None, activity_pk=None):
         ):
             form.add_error("evidence", "مرجع دليل الإرسال أو القرار مطلوب")
         else:
+            created = not letter.pk
             letter.activity = a
             letter.save()
             LetterHistory.objects.create(
@@ -595,6 +597,16 @@ def letter_edit(request, pk=None, activity_pk=None):
                 letter.pk,
                 json.dumps(form.cleaned_data, default=str, ensure_ascii=False),
             )
+            if created:
+                from .services import notify
+
+                notify(
+                    a,
+                    "تم تسجيل كتاب رسمي: " + a.title,
+                    actor=request.user,
+                    push_event="letter",
+                    event_key=f"letter-created:{letter.pk}",
+                )
             return redirect("letter", letter.pk)
     return render(
         request,
@@ -733,7 +745,10 @@ def records(request, module, pk=None):
         )
         if module == "tasks":
             Notification.objects.create(
-                user=item.assigned, text="مهمة: " + item.title, sender=request.user
+                user=item.assigned,
+                text="مهمة: " + item.title,
+                sender=request.user,
+                push_event="task",
             )
         messages.success(request, "تم الحفظ")
         return redirect("records", module=module)
@@ -1298,7 +1313,12 @@ def report_corrections(request, pk):
         audit(request.user, "report_corrections", a.pk, note)
         from .services import notify
 
-        notify(a, "مطلوب تصحيح التقرير الختامي: " + a.title, actor=request.user)
+        notify(
+            a,
+            "مطلوب تصحيح التقرير الختامي: " + a.title,
+            actor=request.user,
+            push_event="report_corrections",
+        )
         messages.success(request, "تم طلب تصحيح التقرير")
     return redirect("activity", a.pk)
 

@@ -23,7 +23,8 @@ def checks():
     import django
 
     django.setup()
-    from django.test import Client
+    from django.test import Client, override_settings
+    from unittest.mock import patch
     from django.utils import timezone
     from django.db import connection, transaction
     from django.core.files.uploadedfile import SimpleUploadedFile
@@ -36,6 +37,7 @@ def checks():
         StoredDocument,
         Letter,
         Task,
+        PushSubscription,
     )
 
     admin = User.objects.get(email="vercel-owner@example.test")
@@ -64,6 +66,21 @@ def checks():
     assert client.post("/login/", {"username": email, "password": password}).url == "/"
     assert client.get("/requests/").status_code == 200
     users = [existing, User.objects.get(email=email)]
+    with transaction.atomic():
+        for owner in [*users, admin]:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT set_config('etcs.user_id',%s,true)", [str(owner.pk)]
+                )
+            device = PushSubscription.objects.create(
+                user=owner,
+                endpoint=f"https://fcm.googleapis.com/fcm/send/synthetic-{owner.pk}",
+                p256dh="synthetic",
+                auth="synthetic",
+            )
+            assert list(PushSubscription.objects.values_list("pk", flat=True)) == [
+                device.pk
+            ]
     client.force_login(users[0])
     page = client.get("/new/event/")
     assert page.status_code == 200
@@ -108,7 +125,26 @@ def checks():
         assert StoredDocument.objects.count() == 0
         assert Activity.objects.count() == 0
     client.force_login(users[0])
-    client.post(f"/requests/{activity_id}/action/", {"action": "submit"})
+    with override_settings(
+        VAPID_PUBLIC_KEY="synthetic",
+        VAPID_PRIVATE_KEY="synthetic",
+        VAPID_ADMIN_EMAIL="send@example.test",
+    ):
+
+        def mock_push(user, *, subscriptions, **kwargs):
+            assert subscriptions and all(
+                device.user_id == user.pk for device in subscriptions
+            )
+            assert "Vercel persistent request" not in kwargs["body"]
+            return {device.pk: "sent" for device in subscriptions}
+
+        with patch("coordination.push.send_push", side_effect=mock_push) as send:
+            client.post(f"/requests/{activity_id}/action/", {"action": "submit"})
+            assert {call.args[0].pk for call in send.call_args_list} == {
+                admin.pk,
+                users[0].pk,
+            }
+
     client.force_login(admin)
     client.post(f"/requests/{activity_id}/action/", {"action": "preliminary"})
     client.post(

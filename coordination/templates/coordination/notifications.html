@@ -1,6 +1,9 @@
 {% extends 'coordination/base.html' %}
 {% block content %}
-<h1>الإشعارات</h1>
+<div class="section-heading">
+  <h1>الإشعارات</h1>
+  <a class="button secondary" href="{% url 'push_preferences' %}">إعدادات إشعارات الجوال</a>
+</div>
 <div class="card">
   {% include 'coordination/notification_list.html' %}
 </div>

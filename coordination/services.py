@@ -30,10 +30,10 @@ def audit(user, action, record, note=""):
     Audit.objects.create(actor=user, action=action, record=str(record), note=note)
 
 
-def notify(a, text, admins=False, actor=None, event_key=None):
+def notify(a, text, admins=False, actor=None, event_key=None, push_event=""):
     p = Profile.objects.filter(user__is_active=True, verified=True)
     if admins:
-        p = p.filter(role__in=["coordinator", "deputy"])
+        p = p.filter(role__in=["coordinator", "deputy", "reviewer"])
         p = [
             x
             for x in p
@@ -46,11 +46,17 @@ def notify(a, text, admins=False, actor=None, event_key=None):
         if event_key:
             Notification.objects.get_or_create(
                 key=f"{event_key}:{x.user_id}",
-                defaults={"user": x.user, "text": text, "activity": a, "sender": actor},
+                defaults={
+                    "user": x.user,
+                    "text": text,
+                    "activity": a,
+                    "sender": actor,
+                    "push_event": push_event,
+                },
             )
         else:
             Notification.objects.create(
-                user=x.user, text=text, activity=a, sender=actor
+                user=x.user, text=text, activity=a, sender=actor, push_event=push_event
             )
 
 
@@ -280,6 +286,14 @@ def transition(user, activity_id, action, note=""):
     )
     audit(user, action, a.pk, note)
     notify(
-        a, f"{a.title}: {a.get_status_display()}", admins=p.role == "club", actor=user
+        a,
+        f"{a.title}: {a.get_status_display()}",
+        admins=p.role == "club",
+        actor=user,
+        push_event="resubmit"
+        if action == "submit" and previous == "changes"
+        else action,
     )
+    if action == "submit":
+        notify(a, "تم استلام الطلب: " + a.title, actor=user, push_event="received")
     return a

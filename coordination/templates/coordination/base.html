@@ -3,6 +3,10 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
+  <meta name="theme-color" content="#112b37">
+  <link rel="manifest" href="{% url 'pwa_manifest' %}">
+  <link rel="apple-touch-icon" href="{% static 'coordination/pwa/icon-192.png' %}">
+  <script src="{% static 'coordination/pwa/register.js' %}" defer></script>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}نظام تنسيق كلية الهندسة والتكنولوجيا{% endblock %}</title>
   <script src="{% static 'coordination/js/theme.js' %}"></script>

@@ -26,7 +26,14 @@ class Command(BaseCommand):
                 return
             Notification.objects.get_or_create(
                 key=f"{key}:{today}:{user.pk}",
-                defaults={"user": user, "text": text, "activity": activity},
+                defaults={
+                    "user": user,
+                    "text": text,
+                    "activity": activity,
+                    "push_event": "final_report"
+                    if key.startswith("final-report:")
+                    else "reminder",
+                },
             )
 
         for task in (

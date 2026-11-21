@@ -2,9 +2,20 @@ from django.contrib import admin
 from django.contrib.auth import views as auth
 from django.urls import path
 from coordination import views as v, extra_views as x
+from coordination import pwa_views, push_views
 from coordination.serverless_views import cron_reminders
 
 urlpatterns = [
+    path("manifest.webmanifest", pwa_views.manifest, name="pwa_manifest"),
+    path("sw.js", pwa_views.service_worker, name="pwa_worker"),
+    path("notifications/preferences/", push_views.preferences, name="push_preferences"),
+    path("notifications/push/key/", push_views.public_key, name="push_key"),
+    path("notifications/push/subscribe/", push_views.subscribe, name="push_subscribe"),
+    path(
+        "notifications/push/unsubscribe/",
+        push_views.unsubscribe,
+        name="push_unsubscribe",
+    ),
     path("cron/reminders/", cron_reminders, name="cron_reminders"),
     path("letters/", x.letter_list, name="letters"),
     path("clubs/", x.clubs_overview, name="clubs"),

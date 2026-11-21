@@ -43,3 +43,11 @@ def bind_cron_notification_sender(sender, instance, **kwargs):
                 "SELECT NULLIF(current_setting('etcs.user_id',true),'')::bigint"
             )
             instance.sender_id = cursor.fetchone()[0]
+
+
+@receiver(post_save, sender=Notification)
+def queue_notification_push(sender, instance, created, raw=False, **kwargs):
+    if created and not raw:
+        from .push import enqueue
+
+        enqueue(instance)
