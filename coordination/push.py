@@ -121,7 +121,11 @@ def payload(notification):
         if activity_id
         else reverse("notifications")
     )
-    tag = f"etcs-{activity_id}-{category}" if activity_id else f"etcs-{notification.pk}"
+    tag = (
+        f"etcs-{notification.user_id}-{activity_id}-{category}"
+        if activity_id
+        else f"etcs-{notification.pk}"
+    )
     return category, {
         "title": "نظام تنسيق الكلية",
         "body": MESSAGES.get(event, "لديك تحديث في نظام التنسيق."),

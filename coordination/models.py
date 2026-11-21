@@ -558,13 +558,20 @@ class CalendarEntry(models.Model):
 
 class PushSubscription(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    endpoint = models.URLField(max_length=2048, unique=True)
+    endpoint = models.URLField(max_length=2048)
     p256dh = models.CharField(max_length=100)
     auth = models.CharField(max_length=32)
     user_agent = models.CharField(max_length=300, blank=True)
     created = models.DateTimeField(auto_now_add=True)
     last_success = models.DateTimeField(null=True, blank=True)
     active = models.BooleanField(default=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "endpoint"], name="push_user_endpoint_unique"
+            )
+        ]
 
 
 class PushPreference(models.Model):

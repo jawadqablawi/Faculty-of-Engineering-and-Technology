@@ -61,7 +61,6 @@ class PushTests(TestCase):
         self.assertEqual(self.register(self.client).status_code, 200)
         device = PushSubscription.objects.get()
         self.client.force_login(self.other)
-        self.assertEqual(self.register(self.client).status_code, 409)
         page = self.client.get(reverse("push_preferences"))
         self.assertNotContains(page, self.data["endpoint"])
         self.assertEqual(self.client.get(reverse("push_key")).json()["endpoints"], [])
@@ -71,9 +70,15 @@ class PushTests(TestCase):
             ).status_code,
             404,
         )
+        self.assertEqual(self.register(self.client).status_code, 200)
+        self.assertEqual(self.register(self.client).status_code, 200)
+        self.assertEqual(
+            PushSubscription.objects.filter(endpoint=device.endpoint).count(), 2
+        )
         self.client.post(
             reverse("push_unsubscribe"), self.data, content_type="application/json"
         )
+        self.assertFalse(PushSubscription.objects.filter(user=self.other).exists())
         device.refresh_from_db()
         self.assertEqual(device.user, self.member)
         csrf_client = Client(enforce_csrf_checks=True)

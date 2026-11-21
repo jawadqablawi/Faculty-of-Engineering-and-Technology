@@ -74,7 +74,7 @@ def checks():
                 )
             device = PushSubscription.objects.create(
                 user=owner,
-                endpoint=f"https://fcm.googleapis.com/fcm/send/synthetic-{owner.pk}",
+                endpoint="https://fcm.googleapis.com/fcm/send/synthetic-shared",
                 p256dh="synthetic",
                 auth="synthetic",
             )

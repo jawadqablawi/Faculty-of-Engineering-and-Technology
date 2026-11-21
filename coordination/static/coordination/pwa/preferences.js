@@ -47,7 +47,7 @@
     let subscription = await worker.pushManager.getSubscription();
 
     function update(active) {
-      status.textContent = active ? "إشعارات الجوال مفعّلة على هذا الجهاز." : "إشعارات الجوال غير مفعّلة على هذا الجهاز.";
+      status.textContent = active ? "إشعارات الجوال مفعّلة لهذا الحساب على هذا الجهاز." : "إشعارات الجوال غير مفعّلة لهذا الحساب على هذا الجهاز.";
       enable.hidden = active;
       enable.disabled = false;
       disable.hidden = !active;
@@ -70,9 +70,7 @@
       } catch (error) {
         status.textContent = error.message === "device_limit"
           ? "وصلت للحد الأقصى للأجهزة. أزل جهازًا ثم حاول مرة أخرى."
-          : error.message === "endpoint_unavailable"
-            ? "الاشتراك مرتبط بحساب آخر. أزله من ذلك الحساب ثم أعد المحاولة."
-            : "تعذّر تفعيل الإشعارات. حاول مرة أخرى.";
+          : "تعذّر تفعيل الإشعارات. حاول مرة أخرى.";
       } finally {
         enable.disabled = false;
       }
@@ -82,8 +80,7 @@
       disable.disabled = true;
       try {
         await post(panel.dataset.unsubscribe, {endpoint: subscription.endpoint});
-        await subscription.unsubscribe();
-        subscription = null;
+        // The browser subscription can still serve another signed-in account.
         update(false);
       } catch {
         status.textContent = "تعذّر إيقاف الإشعارات. حدّث الصفحة وتحقق من حالة الجهاز.";
