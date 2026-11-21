@@ -48,5 +48,11 @@ header .toolbar span{overflow-wrap:anywhere}
   {% else %}
     <a href="{% url 'requests' %}" {% if request.resolver_match.url_name == 'requests' %}aria-current="page"{% endif %}>الطلبات الواردة</a>
   {% endif %}
+  {% if identity.role == 'coordinator' %}
+    <a href="{% url 'accounts' %}" {% if request.resolver_match.url_name == 'accounts' %}aria-current="page"{% endif %}>المستخدمون والدعوات</a>
+    <a href="{% url 'settings' %}" {% if request.resolver_match.url_name == 'settings' %}aria-current="page"{% endif %}>الإعدادات</a>
+    <a href="{% url 'audit_log' %}" {% if request.resolver_match.url_name == 'audit_log' %}aria-current="page"{% endif %}>سجل الإجراءات</a>
+    <a href="{% url 'clubs' %}" {% if request.resolver_match.url_name == 'clubs' %}aria-current="page"{% endif %}>التقويم</a>
+  {% endif %}
 </aside>
 {% endif %}<main>{% for m in messages %}<div class="message {{ m.tags }}" role="{% if m.level >= 40 %}alert{% else %}status{% endif %}">{{ m }}</div>{% endfor %}{% block content %}{% endblock %}</main></div><footer>نظام تنسيق كلية الهندسة والتكنولوجيا · التوقيت: فلسطين · العملة: شيكل</footer></body></html>

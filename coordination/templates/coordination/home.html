@@ -1,9 +1,6 @@
 {% extends 'coordination/base.html' %}
 {% block content %}
-<div class="section-heading">
-  <h1>{% firstof user.get_full_name identity.club.name identity.get_role_display %}</h1>
-  {% if identity.role == 'coordinator' %}<a class="button secondary" href="{% url 'accounts' %}">إدارة حسابات النوادي</a>{% endif %}
-</div>
+<h1>{% firstof user.get_full_name identity.club.name identity.get_role_display %}</h1>
 {% if stats %}
 <div class="grid">
   {% for status, label, count in stats %}
