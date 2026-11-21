@@ -1,30 +1,33 @@
 import json
+
 from django import forms
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.paginator import Paginator
 from django.db import transaction
 from django.http import FileResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_POST
+
 from .access import activities, allowed, profile, require
-from .documents import validate_document
-from .table_views import AUDIT_SORT, LETTER_SORT, page_context
-from .forms import PublicationForm, PlanForm
+from .documents import optimize_image, validate_document
+from .forms import PlanForm, PublicationForm
 from .models import (
     Activity,
-    ApprovalRequirement,
     ActivityComment,
+    ApprovalRequirement,
+    Audit,
     Case,
     CaseDocument,
     Club,
     ClubPlan,
-    Audit,
     Task,
 )
 from .services import audit, notify
+from .table_views import AUDIT_SORT, LETTER_SORT, page_context
 
 
 def scoped_clubs(user):
@@ -251,6 +254,7 @@ def case_upload(request, pk):
     file = request.FILES.get("file")
     try:
         name, _ = validate_document(file)
+        file = optimize_image(file)
     except ValidationError as error:
         messages.error(request, "؛ ".join(error.messages))
     else:
@@ -292,9 +296,8 @@ def my_tasks(request):
     rows = Task.objects.filter(assigned=request.user)
     if p.role == "club":
         rows = rows.filter(club=p.club)
-    return render(
-        request, "coordination/my_tasks.html", {"tasks": rows.order_by("due")}
-    )
+    page = Paginator(rows.order_by("due", "pk"), 40).get_page(request.GET.get("page"))
+    return render(request, "coordination/my_tasks.html", {"tasks": page, "page": page})
 
 
 @login_required
@@ -344,8 +347,8 @@ def club_meetings(request, pk=None):
     p = profile(request.user)
     if p.role != "club":
         raise PermissionDenied
-    from .models import Meeting
     from .forms import model_form
+    from .models import Meeting
 
     q = Meeting.objects.filter(club=p.club)
     obj = get_object_or_404(q, pk=pk, creator=request.user) if pk else None
@@ -373,8 +376,9 @@ def club_meetings(request, pk=None):
 @login_required
 def letter_list(request):
     require(request.user, "letters")
-    from .models import Letter
     from django.db.models import Q
+
+    from .models import Letter
 
     rows = (
         Letter.objects.filter(activity__in=activities(request.user))

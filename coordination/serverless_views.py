@@ -1,11 +1,15 @@
 import secrets
+
 from django.conf import settings
 from django.core.management import call_command
 from django.db import connection, transaction
 from django.http import JsonResponse
+from django.utils import timezone
 from django.views.decorators.http import require_GET
-from .models import Profile
+
+from .models import Notification, Profile
 from .push import defer_immediate, schedule_retries
+from .storage_budget import retention_preview, storage_usage
 
 
 @require_GET
@@ -28,8 +32,24 @@ def cron_reminders(request):
     token = defer_immediate.set(True)
     try:
         call_command("reminders")
+        usage = storage_usage()
+        month = timezone.localdate().strftime("%Y-%m")
+        if usage and usage["percent"] >= 80:
+            Notification.objects.get_or_create(
+                key=f"storage-budget:{month}:{owner.user_id}",
+                defaults={
+                    "user_id": owner.user_id,
+                    "text": "تجاوز تخزين قاعدة البيانات 80% من الميزانية.",
+                },
+            )
+        if timezone.localdate().day == 1:
+            retention_preview_result = retention_preview()
+        else:
+            retention_preview_result = None
     finally:
         defer_immediate.reset(token)
     schedule_retries()
     call_command("deliver_email")
-    return JsonResponse({"status": "processed"})
+    return JsonResponse(
+        {"status": "processed", "retention_preview": retention_preview_result}
+    )

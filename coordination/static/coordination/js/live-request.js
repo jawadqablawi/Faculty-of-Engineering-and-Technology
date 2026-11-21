@@ -51,6 +51,23 @@
         String(data.recipient) === tracking.dataset.recipient) check();
   });
   document.addEventListener("visibilitychange", check);
-  // Covers delayed pushes and requests open on devices without a push subscription.
-  window.setInterval(check, 25000);
+  window.addEventListener("focus", check);
+  // Push and returning to the page remain immediate. An idle visible page
+  // eventually waits longer than Neon’s five-minute idle timeout.
+  let idleDelay = 90000;
+  let timer;
+  function schedule() {
+    clearTimeout(timer);
+    if (document.hidden) return;
+    timer = setTimeout(async () => {
+      await check();
+      idleDelay = Math.min(idleDelay * 2, 600000);
+      schedule();
+    }, idleDelay);
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) idleDelay = 90000;
+    schedule();
+  });
+  schedule();
 })();

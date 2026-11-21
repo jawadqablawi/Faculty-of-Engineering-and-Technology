@@ -222,3 +222,15 @@ if ETCS_SERVERLESS:
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
 VAPID_ADMIN_EMAIL = os.environ.get("VAPID_ADMIN_EMAIL", "").strip()
+
+# Storage budget and preview-only retention on Vercel.
+ETCS_STORAGE_BUDGET_BYTES = int(
+    os.environ.get("ETCS_STORAGE_BUDGET_BYTES", "1000000000")
+)
+ETCS_MAX_REQUEST_ATTACHMENTS = int(os.environ.get("ETCS_MAX_REQUEST_ATTACHMENTS", "10"))
+ETCS_UPLOAD_IMAGE_MAX_EDGE = int(
+    os.environ.get("ETCS_UPLOAD_IMAGE_MAX_EDGE", "2400" if ETCS_SERVERLESS else "0")
+)
+ETCS_RETENTION_READ_DAYS = int(os.environ.get("ETCS_RETENTION_READ_DAYS", "180"))
+ETCS_RETENTION_DELIVERY_DAYS = int(os.environ.get("ETCS_RETENTION_DELIVERY_DAYS", "90"))
+ETCS_RETENTION_DRAFT_DAYS = int(os.environ.get("ETCS_RETENTION_DRAFT_DAYS", "180"))

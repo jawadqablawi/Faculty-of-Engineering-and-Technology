@@ -1,11 +1,15 @@
 from django.contrib import admin
 from django.contrib.auth import views as auth
 from django.urls import path
-from coordination import views as v, extra_views as x
-from coordination import pwa_views, push_views
+
+from coordination import extra_views as x
+from coordination import push_views, pwa_views
+from coordination import views as v
+from coordination.budget_views import database_budget
 from coordination.serverless_views import cron_reminders
 
 urlpatterns = [
+    path("manage/storage/", database_budget, name="database_budget"),
     path("manifest.webmanifest", pwa_views.manifest, name="pwa_manifest"),
     path("sw.js", pwa_views.service_worker, name="pwa_worker"),
     path("notifications/preferences/", push_views.preferences, name="push_preferences"),

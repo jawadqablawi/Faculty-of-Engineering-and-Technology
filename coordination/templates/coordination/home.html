@@ -19,6 +19,7 @@
     {% endif %}
   </div>
 </section>
+{% if identity.role == 'coordinator' %}<p><a href="{% url 'database_budget' %}">ميزانية تخزين قاعدة البيانات</a></p>{% endif %}
 {% if stats %}
 <section class="card">
   <h2>مراحل الموافقة</h2>

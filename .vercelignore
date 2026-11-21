@@ -10,3 +10,12 @@ docs/
 coordination/tests.py
 coordination/test_*.py
 scripts/
+Dockerfile
+.dockerignore
+compose.yaml
+compose.windows.yaml
+START-WINDOWS.bat
+STOP-WINDOWS.bat
+deploy/
+.github/
+.ruff_cache/

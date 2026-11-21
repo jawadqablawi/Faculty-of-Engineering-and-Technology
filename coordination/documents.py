@@ -1,11 +1,12 @@
 """Validation shared by every private document upload."""
 
 import hashlib
-from pathlib import Path
 import uuid
 import zipfile
-from django.core.exceptions import ValidationError
+from pathlib import Path
+
 from django.conf import settings
+from django.core.exceptions import ValidationError
 
 SIGNATURES = {
     ".pdf": b"%PDF-",
@@ -53,3 +54,44 @@ def validate_document(file):
     name = Path(file.name).name[:200]
     file.name = f"{uuid.uuid4()}{ext}"
     return name, checksum.hexdigest()
+
+
+def optimize_image(file):
+    """Return a smaller same-format image where safe, retaining PNG transparency."""
+    limit = settings.ETCS_UPLOAD_IMAGE_MAX_EDGE
+    suffix = Path(file.name).suffix.lower()
+    if limit <= 0 or suffix not in {".png", ".jpg", ".jpeg"}:
+        return file
+
+    from io import BytesIO
+
+    from django.core.files.base import ContentFile
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    try:
+        with Image.open(file) as original:
+            if original.width * original.height > 25_000_000:
+                raise ValidationError("أبعاد الصورة كبيرة جدًا")
+            if getattr(original, "is_animated", False):
+                return file
+            image = ImageOps.exif_transpose(original)
+            image.thumbnail((limit, limit), Image.Resampling.LANCZOS)
+            output = BytesIO()
+            if suffix == ".png":
+                image.save(output, "PNG", optimize=True)
+            else:
+                image.convert("RGB").save(output, "JPEG", quality=85, optimize=True)
+            return (
+                ContentFile(output.getvalue(), name=file.name)
+                if output.tell() < file.size
+                else file
+            )
+    except (
+        OSError,
+        ValueError,
+        UnidentifiedImageError,
+        Image.DecompressionBombError,
+    ) as error:
+        raise ValidationError("تعذّر قراءة الصورة") from error
+    finally:
+        file.seek(0)

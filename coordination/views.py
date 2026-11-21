@@ -1,39 +1,74 @@
-import json, io
-from datetime import timedelta, datetime
-from zoneinfo import ZoneInfo
+import json
+import logging
+from datetime import datetime, timedelta
 from pathlib import Path
+from smtplib import SMTPException
 from uuid import UUID
-from django.shortcuts import render, redirect, get_object_or_404
+from zoneinfo import ZoneInfo
+
+from django import forms
+from django.conf import settings
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import (
-    SetPasswordForm,
     AuthenticationForm,
     PasswordResetForm,
+    SetPasswordForm,
 )
-from smtplib import SMTPException
-import logging
+from django.contrib.auth.models import User
 from django.contrib.auth.views import LoginView, PasswordResetView
-from django.contrib import messages
+from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import send_mail
-from django.core import signing
-from django.conf import settings
-from .security import consume_limit
-from .table_views import REQUEST_SORT, page_context
-from .documents import validate_document
+from django.core.paginator import Paginator
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Count, Sum
+from django.db.models import Avg, Count, F, Q, Sum
 from django.http import FileResponse, HttpResponse, JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
-from django.contrib.auth.models import User
-from .models import *
-from .forms import *
-from .access import profile, allowed, require, activities
-from .services import transition, audit
+
+from .access import activities, allowed, profile, require
+from .documents import optimize_image, validate_document
+from .forms import (
+    DETAIL_FIELDS,
+    CaseForm,
+    ClubAccountForm,
+    ClubForm,
+    ClubNeeds,
+    ClubRequestForm,
+    IdeaForm,
+    LetterForm,
+    MeetingForm,
+    ReportForm,
+    TaskForm,
+    model_form,
+)
+from .models import (
+    Activity,
+    Attachment,
+    Audit,
+    Case,
+    Club,
+    EventDate,
+    History,
+    Idea,
+    Invitation,
+    Letter,
+    LetterHistory,
+    Meeting,
+    Notification,
+    Profile,
+    Report,
+    Setting,
+    Task,
+)
+from .security import consume_limit
+from .services import audit, transition
+from .table_views import REQUEST_SORT, page_context
 
 
 class SafePasswordResetForm(PasswordResetForm):
@@ -326,8 +361,8 @@ def edit_activity(request, kind="event", pk=None):
 
 @login_required
 def activity(request, pk):
-    from .scheduling import has_conflicts
     from .request_tracking import tracking
+    from .scheduling import has_conflicts
 
     if request.method == "GET" and request.GET.get("live") == "1":
         revision = get_object_or_404(
@@ -382,6 +417,7 @@ def activity(request, pk):
             "conflicts": conflicts,
             "tracking": tracker,
             "display_history": display_history,
+            "activity_comments": a.comments.select_related("actor"),
             "details": [
                 (DETAIL_FIELDS.get(k, k), v)
                 for k, v in a.details.items()
@@ -446,9 +482,20 @@ def upload(request, pk):
     ):
         messages.error(request, "اكتب وصفًا للملف من حرف إلى 500 حرف قبل الإرسال.")
         return redirect("activity", pk)
+    if a.attachments.count() >= settings.ETCS_MAX_REQUEST_ATTACHMENTS:
+        messages.error(
+            request, "بلغ الطلب الحد الأقصى للمرفقات، بما فيها الإصدارات السابقة."
+        )
+        return redirect("activity", pk)
     f = request.FILES.get("file")
     try:
         original, checksum = validate_document(f)
+        existing_file = (
+            a.attachments.filter(checksum=checksum, deleted=False)
+            .values_list("file", flat=True)
+            .first()
+        )
+        stored_file = existing_file or optimize_image(f)
     except ValidationError as error:
         messages.error(request, "؛ ".join(error.messages))
         return redirect("activity", pk)
@@ -472,7 +519,7 @@ def upload(request, pk):
                 return redirect("activity", pk)
         Attachment.objects.create(
             activity=a,
-            file=f,
+            file=stored_file,
             name=original,
             uploader=request.user,
             checksum=checksum,
@@ -766,13 +813,15 @@ def records(request, module, pk=None):
             )
         messages.success(request, "تم الحفظ")
         return redirect("records", module=module)
+    records_page = Paginator(q.order_by("pk"), 40).get_page(request.GET.get("page"))
     return render(
         request,
         "coordination/records.html",
         {
             "title": title,
             "form": form,
-            "records": q,
+            "records": records_page,
+            "page": records_page,
             "module": module,
             "record_history": Audit.objects.filter(
                 action="save_" + module, record=str(pk)
@@ -947,49 +996,9 @@ def reports(request):
             except (ValueError, ValidationError):
                 return HttpResponse("عامل تصفية غير صالح", status=400)
     if request.GET.get("export") == "xlsx":
-        from openpyxl import Workbook
+        from .report_exports import activity_workbook
 
-        book = Workbook()
-        sheet = book.active
-        sheet.title = "الأنشطة"
-        sheet.sheet_view.rightToLeft = True
-        sheet.append(
-            [
-                "رقم الطلب",
-                "النادي",
-                "العنوان",
-                "النوع",
-                "التاريخ",
-                "الحالة",
-                "الحضور المتوقع",
-                "الميزانية",
-            ]
-        )
-        for a in q:
-            vals = [
-                a.number or "",
-                a.club.name,
-                a.title,
-                a.get_kind_display(),
-                str(a.date or ""),
-                a.get_status_display(),
-                a.participants,
-                float(a.budget),
-            ]
-            sheet.append(
-                [
-                    (
-                        "'" + v
-                        if isinstance(v, str) and v.startswith(("=", "+", "-", "@"))
-                        else v
-                    )
-                    for v in vals
-                ]
-            )
-        out = io.BytesIO()
-        book.save(out)
-        out.seek(0)
-        return FileResponse(out, as_attachment=True, filename="etcs-report.xlsx")
+        return activity_workbook(q)
     if request.GET.get("export") == "pdf":
         from .pdf import render_pdf
 
@@ -997,20 +1006,25 @@ def reports(request):
             render_pdf("coordination/report_print.html", {"rows": q}),
             content_type="application/pdf",
         )
-    submitted = dict(q.exclude(submitted__isnull=True).values_list("pk", "submitted"))
-    durations = [
-        (created - submitted[pk]).total_seconds() / 86400
-        for pk, created in History.objects.filter(
-            activity__in=q, status="approved"
-        ).values_list("activity_id", "created")
-        if pk in submitted
-    ]
-    average_days = sum(durations) / len(durations) if durations else None
+    average_duration = History.objects.filter(
+        activity__in=q,
+        status="approved",
+        activity__submitted__isnull=False,
+    ).aggregate(average=Avg(F("created") - F("activity__submitted")))["average"]
+    average_days = (
+        average_duration.total_seconds() / 86400
+        if average_duration is not None
+        else None
+    )
+    page = Paginator(
+        q.order_by("-date" if mode == "archive" else "-updated", "pk"), 40
+    ).get_page(request.GET.get("page"))
     return render(
         request,
         "coordination/reports.html",
         {
-            "rows": q,
+            "rows": page,
+            "page": page,
             "archive": mode == "archive",
             "average_days": average_days,
             "attendance": Report.objects.filter(activity__in=q).aggregate(
@@ -1210,11 +1224,15 @@ def accounts(request):
             target.save(update_fields=["is_active"])
             audit(request.user, "account_activation", target.pk, str(target.is_active))
         return redirect("accounts")
+    users_page = Paginator(
+        User.objects.select_related("profile__club").order_by("email", "pk"), 40
+    ).get_page(request.GET.get("page"))
     return render(
         request,
         "coordination/accounts.html",
         {
-            "users": User.objects.select_related("profile__club").order_by("email"),
+            "users": users_page,
+            "page": users_page,
             "invitations": Invitation.objects.filter(
                 used=False, expires__gt=timezone.now()
             ).order_by("-pk"),
@@ -1414,17 +1432,17 @@ def operations_report(request, kind):
             "التاريخ",
             "موعد المتابعة",
         ]
-        rows = [
-            [
-                c.number,
-                c.category,
-                c.subject,
-                c.status,
-                c.created.date(),
-                c.follow_up or "",
+
+        def format_row(case):
+            return [
+                case.number,
+                case.category,
+                case.subject,
+                case.status,
+                case.created.date(),
+                case.follow_up or "",
             ]
-            for c in q
-        ]
+
         title = "تقرير شؤون الطلبة — سري"
     elif kind == "letters":
         require(request.user, "letters")
@@ -1439,17 +1457,17 @@ def operations_report(request, kind):
             "الحالة",
             "المتابعة",
         ]
-        rows = [
-            [
-                l.number,
-                l.official_number,
-                l.subject,
-                l.recipient,
-                l.status,
-                l.follow_up or "",
+
+        def format_row(letter):
+            return [
+                letter.number,
+                letter.official_number,
+                letter.subject,
+                letter.recipient,
+                letter.status,
+                letter.follow_up or "",
             ]
-            for l in q
-        ]
+
         title = "تقرير الكتب الرسمية"
     elif kind == "tasks":
         require(request.user, "operations")
@@ -1459,46 +1477,50 @@ def operations_report(request, kind):
             else Task.objects.filter(assigned=request.user)
         )
         headers = ["المهمة", "المكلف", "الموعد", "الحالة", "الأولوية"]
-        rows = [[t.title, t.assigned.email, t.due, t.status, t.priority] for t in q]
+        q = q.select_related("assigned")
+
+        def format_row(task):
+            return [
+                task.title,
+                task.assigned.email,
+                task.due,
+                task.status,
+                task.priority,
+            ]
+
         title = "تقرير المهام"
     else:
         raise PermissionDenied
     if request.GET.get("export") == "xlsx":
-        from openpyxl import Workbook
+        from .report_exports import workbook_response
 
-        book = Workbook()
-        sheet = book.active
-        sheet.sheet_view.rightToLeft = True
-        sheet.append(headers)
-        for row in rows:
-            sheet.append(
-                [
-                    (
-                        "'" + v
-                        if isinstance(v, str) and v.startswith(("=", "+", "-", "@"))
-                        else v
-                    )
-                    for v in row
-                ]
-            )
-        stream = io.BytesIO()
-        book.save(stream)
-        stream.seek(0)
-        return FileResponse(stream, as_attachment=True, filename=f"etcs-{kind}.xlsx")
+        return workbook_response(
+            headers, map(format_row, q.iterator(chunk_size=250)), f"etcs-{kind}.xlsx"
+        )
     if request.GET.get("export") == "pdf":
         from .pdf import render_pdf
 
         return HttpResponse(
             render_pdf(
                 "coordination/generic_print.html",
-                {"headers": headers, "rows": rows, "title": title},
+                {
+                    "headers": headers,
+                    "rows": list(map(format_row, q.iterator(chunk_size=250))),
+                    "title": title,
+                },
             ),
             content_type="application/pdf",
         )
+    page = Paginator(q.order_by("pk"), 40).get_page(request.GET.get("page"))
     return render(
         request,
         "coordination/operations_report.html",
-        {"headers": headers, "rows": rows, "title": title},
+        {
+            "headers": headers,
+            "rows": map(format_row, page),
+            "title": title,
+            "page": page,
+        },
     )
 
 

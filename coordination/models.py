@@ -349,6 +349,13 @@ class Notification(models.Model):
     read = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["user", "read", "-created"], name="notif_user_read_created"
+            )
+        ]
+
 
 class Audit(models.Model):
     actor = models.ForeignKey(User, on_delete=models.PROTECT, null=True)
@@ -356,6 +363,13 @@ class Audit(models.Model):
     record = models.CharField(max_length=100)
     note = models.TextField(blank=True)
     created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["action", "record", "-created"], name="audit_action_record_date"
+            )
+        ]
 
 
 class Invitation(models.Model):
@@ -589,3 +603,10 @@ class PushDelivery(models.Model):
     attempts = models.PositiveSmallIntegerField(default=0)
     outcome = models.CharField(max_length=30, default="pending")
     next_attempt = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["outcome", "next_attempt"], name="push_outcome_next_attempt"
+            )
+        ]

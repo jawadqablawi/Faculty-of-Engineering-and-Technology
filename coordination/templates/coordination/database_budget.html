@@ -1,0 +1,14 @@
+{% extends 'coordination/base.html' %}
+{% block content %}
+<h1>ميزانية تخزين قاعدة البيانات</h1>
+{% if usage %}
+<div class="message {% if usage.percent >= 85 %}error{% elif usage.percent >= 70 %}warning{% endif %}">
+  {{ usage.size|filesizeformat }} · {{ usage.percent|floatformat:1 }}% من الميزانية المضبوطة
+</div>
+<p class="muted">هذا قياس قاعدة PostgreSQL الحالية. راجع لوحة Neon لحصة المشروع والفروع والنقل.</p>
+<div class="card table-wrap">
+  <table><thead><tr><th scope="col">الجدول</th><th scope="col">الحجم شامل الفهارس</th></tr></thead>
+  <tbody>{% for table, size in usage.tables %}<tr><td><bdi>{{ table }}</bdi></td><td>{{ size|filesizeformat }}</td></tr>{% endfor %}</tbody></table>
+</div>
+{% else %}<p>قياس الحجم متاح على PostgreSQL.</p>{% endif %}
+{% endblock %}

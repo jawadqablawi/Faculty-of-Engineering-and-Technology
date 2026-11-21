@@ -29,3 +29,13 @@ jobs:
       - run: python scripts/vercel_smoke.py
         env:
           ETCS_TEST_DATABASE_URL: postgresql://postgres:temporary-ci-only@127.0.0.1:5432/postgres?sslmode=disable
+
+      - name: Lint storage budget and retention code
+        run: |
+          pip install ruff==0.17.3
+          ruff format --check coordination/storage_budget.py coordination/budget_views.py coordination/management/commands/retention_preview.py coordination/test_budget.py coordination/report_exports.py scripts/check_bundle_budget.py
+          ruff check coordination/storage_budget.py coordination/budget_views.py coordination/management/commands/retention_preview.py coordination/test_budget.py coordination/report_exports.py scripts/check_bundle_budget.py
+      - name: Check Vercel dependency budget without local PDF renderer
+        run: |
+          pip install --no-compile --target /tmp/etcs-vercel-deps -r requirements.txt
+          python scripts/check_bundle_budget.py /tmp/etcs-vercel-deps

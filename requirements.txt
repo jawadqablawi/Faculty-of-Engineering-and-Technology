@@ -9,7 +9,6 @@ certifi==2026.11.20
 cffi==2.1.1
 charset_normalizer==3.5.2
 cryptography==50.0.2
-cssselect2==0.10.1
 Django==5.2.18
 et_xmlfile==2.0.0
 fonttools==4.68.0
@@ -27,18 +26,11 @@ psycopg-binary==3.3.6
 psycopg==3.3.6
 py-vapid==1.9.6
 pycparser==3.12
-pydyf==0.13.0
-pyphen==0.18.1
 pywebpush==2.3.0
 requests==2.34.2
 sqlparse==0.6.1
-tinycss2==1.5.1
-tinyhtml5==2.1.0
 typing_extensions==4.16.0
 uharfbuzz==0.57.0
 urllib3==2.8.0
-weasyprint==69.0
-webencodings==0.6.1
 whitenoise==6.12.0
 yarl==1.25.1
-zopfli==0.4.3
