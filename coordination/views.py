@@ -2,6 +2,7 @@ import json, io
 from datetime import timedelta, datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
+from uuid import UUID
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import (
@@ -18,6 +19,7 @@ from django.core.mail import send_mail
 from django.core import signing
 from django.conf import settings
 from .security import consume_limit
+from .table_views import REQUEST_SORT, page_context
 from .documents import validate_document
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Count, Sum
@@ -91,6 +93,9 @@ def context(request):
         p = profile(request.user)
         return {
             "identity": p,
+            "unread_count": Notification.objects.filter(
+                user=request.user, read=False
+            ).count(),
             "upload_limit_mb": settings.ETCS_MAX_UPLOAD_BYTES // (1024 * 1024),
             "admin_mode": p.role != "club",
             "can_requests": allowed(request.user, "requests", True),
@@ -103,23 +108,86 @@ def context(request):
         return {}
 
 
+WAITING_REQUEST_STATES = [
+    "review",
+    "changes",
+    "preliminary",
+    "council",
+    "approvals",
+    "student_approved",
+]
+
+
 @login_required
 def home(request):
     p = profile(request.user)
     requests = activities(request.user)
+    if p.role != "club":
+        requests = requests.exclude(status="draft")
+    counts = {
+        row["status"]: row["total"]
+        for row in requests.order_by().values("status").annotate(total=Count("pk"))
+    }
+    tasks = Task.objects.filter(assigned=request.user).exclude(status="مكتملة")
+    if p.role == "club":
+        tasks = tasks.filter(club_id=p.club_id)
     stats = []
     if p.role != "club":
-        for status, label in [
-            ("review", "الطلبات الجديدة"),
-            ("council", "قيد الموافقة من المجلس"),
-            ("student_approved", "الموافق عليها من شؤون الطلبة"),
-            ("approved", "المعتمدة رسميًا"),
-        ]:
-            states = ["approved", "completed"] if status == "approved" else [status]
-            stats.append((status, label, requests.filter(status__in=states).count()))
-        requests = requests.filter(status="review")
+        stats = [
+            ("review", "الطلبات الجديدة", counts.get("review", 0)),
+            ("council", "قيد الموافقة من المجلس", counts.get("council", 0)),
+            (
+                "student_approved",
+                "الموافق عليها من شؤون الطلبة",
+                counts.get("student_approved", 0),
+            ),
+            (
+                "approved",
+                "المعتمدة رسميًا",
+                counts.get("approved", 0) + counts.get("completed", 0),
+            ),
+        ]
+    chart = [
+        (label, counts.get(status, 0))
+        for status, label in Activity.STATES
+        if counts.get(status)
+    ]
+    today = timezone.localdate()
+    week_starts = [today + timedelta(weeks=index) for index in range(4)]
+    upcoming = requests.filter(status="approved", date__gte=today).aggregate(
+        total=Count("pk"),
+        **{
+            f"week_{index}": Count(
+                "pk", filter=Q(date__gte=start, date__lt=start + timedelta(weeks=1))
+            )
+            for index, start in enumerate(week_starts)
+        },
+    )
+    upcoming_chart = [
+        (start, upcoming[f"week_{index}"]) for index, start in enumerate(week_starts)
+    ]
+    upcoming_chart_max = max(1, *(total for _, total in upcoming_chart))
     return render(
-        request, "coordination/home.html", {"recent": requests[:8], "stats": stats}
+        request,
+        "coordination/home.html",
+        {
+            "recent": (
+                requests if p.role == "club" else requests.filter(status="review")
+            )[:8],
+            "stats": stats,
+            "chart": chart,
+            "chart_max": max(counts.values(), default=1),
+            "pending_count": sum(
+                counts.get(status, 0) for status in WAITING_REQUEST_STATES
+            ),
+            "upcoming_count": upcoming["total"],
+            "upcoming_chart": upcoming_chart,
+            "upcoming_chart_max": upcoming_chart_max,
+            "task_count": tasks.count(),
+            "notification_count": Notification.objects.filter(
+                user=request.user, read=False
+            ).count(),
+        },
     )
 
 
@@ -129,11 +197,18 @@ def request_list(request):
     q = activities(request.user)
     if p.role != "club":
         q = q.exclude(status="draft")
+    clubs = (
+        q.order_by("club__name", "club_id")
+        .values_list("club_id", "club__name")
+        .distinct()
+    )
     if request.GET.get("q"):
         q = q.filter(
             Q(title__icontains=request.GET["q"]) | Q(number__icontains=request.GET["q"])
         )
-    if request.GET.get("status"):
+    if request.GET.get("status") == "pending":
+        q = q.filter(status__in=WAITING_REQUEST_STATES)
+    elif request.GET.get("status"):
         status = request.GET["status"]
         q = q.filter(
             status__in=["approved", "completed"] if status == "approved" else [status]
@@ -141,7 +216,7 @@ def request_list(request):
     if request.GET.get("kind"):
         q = q.filter(kind=request.GET["kind"])
     if request.GET.get("club"):
-        if not request.GET["club"].isdigit():
+        if not request.GET["club"].isdecimal():
             return HttpResponse("عامل تصفية غير صالح", status=400)
         q = q.filter(club_id=request.GET["club"])
     return render(
@@ -149,7 +224,8 @@ def request_list(request):
         "coordination/list.html",
         {
             "title": "طلباتي ومتابعتها" if p.role == "club" else "الطلبات الواردة",
-            "rows": q,
+            **page_context(request, q, REQUEST_SORT, "-updated", 20),
+            "clubs": clubs,
             "states": Activity.STATES,
         },
     )
@@ -250,8 +326,11 @@ def edit_activity(request, kind="event", pk=None):
 
 @login_required
 def activity(request, pk):
+    from .scheduling import has_conflicts
+
     a = get_object_or_404(activities(request.user), pk=pk)
     p = profile(request.user)
+    conflicts = has_conflicts(a)
     if p.role == "club" or a.details.get("simple_request"):
         steps = {
             "review": [("forward", "إحالة إلى المجلس")],
@@ -265,6 +344,7 @@ def activity(request, pk):
             "coordination/club_request.html",
             {
                 "a": a,
+                "conflicts": conflicts,
                 "editable": p.role == "club" and a.status in {"draft", "changes"},
                 "requirements": a.details.get("requirements", []),
                 "attachments": a.attachments.filter(deleted=False).order_by("created"),
@@ -281,9 +361,6 @@ def activity(request, pk):
                 else "",
             },
         )
-    from .scheduling import has_conflicts
-
-    conflicts = has_conflicts(a)
     # Conflict existence only; never expose another club's private request.
     return render(
         request,
@@ -683,7 +760,32 @@ def records(request, module, pk=None):
 def calendar(request):
     profile(request.user)
     # Other clubs' calendar entries contain only explicitly approved public-safe fields.
-    from .scheduling import public_calendar
+    from .scheduling import has_conflicts, public_calendar
+
+    if event_id := request.GET.get("event_conflict"):
+        scoped = activities(request.user).filter(status="approved", kind="event")
+        activity = None
+        try:
+            if event_id.startswith("day-"):
+                day_id = int(event_id.removeprefix("day-"))
+                event_day = (
+                    EventDate.objects.select_related("activity")
+                    .filter(pk=day_id, activity__in=scoped)
+                    .first()
+                )
+                activity = event_day.activity if event_day else None
+            else:
+                activity = scoped.filter(pk=UUID(event_id)).first()
+        except (ValueError, OverflowError):
+            pass
+        result = None
+        if activity and all(
+            (activity.date, activity.start, activity.end, activity.venue)
+        ):
+            result = has_conflicts(activity)
+        response = JsonResponse({"conflict": result})
+        response["Cache-Control"] = "private, no-store"
+        return response
 
     q = public_calendar()
     return render(request, "coordination/calendar.html", {"events": q})
@@ -745,16 +847,39 @@ def calendar_export(request):
 
 
 @login_required
+@never_cache
 def notifications(request):
     profile(request.user)
-    q = Notification.objects.filter(user=request.user)
+    notifications = Notification.objects.filter(user=request.user)
     if request.method == "POST":
-        q.update(read=True)
+        notification_id = request.POST.get("notification")
+        if notification_id is not None:
+            try:
+                notification_id = int(notification_id)
+            except ValueError:
+                return HttpResponse(status=400)
+            target = get_object_or_404(notifications, pk=notification_id)
+            notifications.filter(pk=target.pk, read=False).update(read=True)
+        else:
+            notifications.filter(read=False).update(read=True)
+        if request.headers.get("Accept") == "application/json":
+            return JsonResponse({"unread": notifications.filter(read=False).count()})
         return redirect("notifications")
+    if request.GET.get("panel") == "1":
+        return render(
+            request,
+            "coordination/notification_list.html",
+            {
+                "notifications": notifications.order_by("-created", "-pk")[:6],
+                "compact": True,
+            },
+        )
     return render(
         request,
         "coordination/notifications.html",
-        {"notifications": q.order_by("-created")[:100]},
+        {
+            "notifications": notifications.order_by("-created", "-pk")[:100],
+        },
     )
 
 

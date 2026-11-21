@@ -1,16 +1,55 @@
 {% extends 'coordination/base.html' %}
 {% block content %}
 <h1>{% firstof user.get_full_name identity.club.name identity.get_role_display %}</h1>
-{% if stats %}
-<div class="grid">
-  {% for status, label, count in stats %}
-    <a class="card" href="{% url 'requests' %}?status={{ status }}">
-      <span>{{ label }}</span>
-      <div class="metric">{{ count }}</div>
-    </a>
-  {% endfor %}
+<div class="grid dashboard-metrics">
+  <a class="card" href="{% url 'requests' %}?status=pending">الطلبات المعلقة<div class="metric">{{ pending_count }}</div></a>
+  <a class="card" href="{% url 'calendar' %}">الفعاليات القادمة<div class="metric">{{ upcoming_count }}</div></a>
+  <a class="card" href="{% url 'my_tasks' %}">مهامي المفتوحة<div class="metric">{{ task_count }}</div></a>
+  <a class="card" href="{% url 'notifications' %}">الإشعارات غير المقروءة<div class="metric">{{ notification_count }}</div></a>
 </div>
+<section class="card">
+  <h2>إجراءات سريعة</h2>
+  <div class="toolbar">
+    {% if identity.role == 'club' %}
+      <a class="button" href="{% url 'new_activity' 'event' %}">طلب فعالية جديدة</a>
+      <a class="button secondary" href="{% url 'new_activity' 'online' %}">طلب ورشة إلكترونية</a>
+    {% else %}
+      <a class="button" href="{% url 'requests' %}">فتح الطلبات الواردة</a>
+      {% if identity.role == 'coordinator' %}<a class="button secondary" href="{% url 'create_club_account' %}">إنشاء حساب نادي</a>{% endif %}
+    {% endif %}
+  </div>
+</section>
+{% if stats %}
+<section class="card">
+  <h2>مراحل الموافقة</h2>
+  <ul class="dashboard-stages">
+    {% for status, label, count in stats %}
+      <li><a href="{% url 'requests' %}?status={{ status }}">{{ label }} <strong>{{ count }}</strong></a></li>
+    {% endfor %}
+  </ul>
+</section>
 {% endif %}
+<section class="card">
+  <h2>توزيع الطلبات حسب الحالة</h2>
+  {% if chart %}
+  <ul class="dashboard-chart">
+    {% for label, total in chart %}
+      <li><span>{{ label }}</span><meter aria-label="{{ label }}" min="0" max="{{ chart_max }}" value="{{ total }}"></meter><strong>{{ total }}</strong></li>
+    {% endfor %}
+  </ul>
+  {% else %}
+    <p class="muted">سيظهر التوزيع هنا عند إضافة الطلبات.</p>
+    <a href="{% url 'requests' %}">فتح قائمة الطلبات</a>
+  {% endif %}
+</section>
+<section class="card">
+  <h2>الفعاليات المعتمدة في الأسابيع الأربعة القادمة</h2>
+  <ul class="dashboard-chart">
+    {% for start, total in upcoming_chart %}
+      <li><span>من {{ start|date:"j F" }}</span><meter aria-label="أسبوع {{ start|date:'j F' }}" min="0" max="{{ upcoming_chart_max }}" value="{{ total }}"></meter><strong>{{ total }}</strong></li>
+    {% endfor %}
+  </ul>
+</section>
 <section class="card">
   <div class="section-heading">
     <h2>{% if identity.role == 'club' %}آخر طلباتي{% else %}الطلبات الجديدة{% endif %}</h2>

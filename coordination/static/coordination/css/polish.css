@@ -1,0 +1,86 @@
+.skip-link { position: fixed; inset-block-start: var(--space-2); inset-inline-start: var(--space-2); z-index: 8; transform: translateY(-200%); }
+.skip-link:focus { transform: none; }
+:focus-visible { outline-offset: 3px; }
+.workspace-nav a, .workspace-tools summary, .grid-sort-button, .table-pager a, .breadcrumbs a {
+  min-block-size: var(--control-height);
+}
+.breadcrumbs a { display: inline-flex; align-items: center; }
+.workspace-nav a { transition: background-color var(--duration-fast), color var(--duration-fast); }
+[data-shortcut-setting] { min-block-size: var(--control-height); display: flex; gap: var(--space-2); align-items: center; }
+.workspace-notifications { position: relative; border: 0; padding: 0; }
+.workspace-notifications summary { position: relative; list-style: none; }
+.workspace-notifications summary::-webkit-details-marker { display: none; }
+.notification-count {
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  min-inline-size: 1.25rem;
+  padding-inline: var(--space-1);
+  border-radius: var(--radius-pill);
+  color: var(--on-danger);
+  background: var(--danger);
+  font-size: .75rem;
+  line-height: 1.4;
+}
+.notification-panel {
+  position: absolute;
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-end: 0;
+  z-index: 4;
+  margin: 0;
+  inline-size: min(24rem, calc(100vw - 2rem));
+  max-block-size: min(32rem, 70vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.notification-panel .section-heading a { min-block-size: var(--control-height); display: inline-flex; align-items: center; }
+[data-notification-preview][aria-busy="true"]:empty::after { content: "جارٍ تحميل الإشعارات…"; color: var(--muted); }
+.notification-list { margin: var(--space-3) 0 0; padding: 0; list-style: none; }
+.notification-list li { padding: var(--space-3); border-block-end: 1px solid var(--line); overflow-wrap: anywhere; }
+.notification-list li[data-unread] { background: var(--accent-soft); }
+.notification-list small { display: block; }
+.notification-list form { margin-block-start: var(--space-2); }
+.workspace-notifications[open] .notification-panel, .workspace-profile[open] .workspace-profile-panel, .modal[open], .toast {
+  animation: polish-enter var(--duration-normal) ease-out;
+}
+@keyframes polish-enter { from { opacity: 0; transform: translateY(-.35rem); } }
+[data-toast-region] {
+  position: fixed;
+  z-index: 5;
+  inset-block-end: max(var(--space-3), env(safe-area-inset-bottom));
+  inset-inline-end: var(--space-3);
+  inline-size: min(24rem, calc(100% - 2 * var(--space-3)));
+}
+[data-toast-region]:empty { display: none; }
+[data-toast-region] .toast { box-shadow: var(--shadow-card); }
+@media (max-width: 800px) {
+  .workspace-notifications { position: static; }
+  .site-header { position: relative; }
+  .notification-panel { inset-inline-end: var(--space-3); }
+}
+@media print {
+  @page { margin: 14mm; }
+  :root { color-scheme: light; }
+  .skip-link, [data-toast-region], .toast, .breadcrumbs, .grid-filters, .table-pager,
+  form, dialog, .workspace-drawer, .calendar-agenda, #calendar-empty[hidden] { display: none !important; }
+  main, body { background: white; color: black; padding: 0; }
+  main a, main .muted, main small, main .badge, main .metric { color: black; }
+  .card { padding: 0; break-inside: auto; }
+  h1, h2, h3 { break-after: avoid; }
+  .table-wrap { overflow: visible; }
+  .responsive-table { display: table; }
+  .responsive-table thead { display: table-header-group; }
+  .responsive-table tbody { display: table-row-group; }
+  .responsive-table tr, .responsive-table tr:has(> th) { display: table-row; }
+  .responsive-table th, .responsive-table td { display: table-cell; }
+  .responsive-table [data-print-match][hidden] { display: table-row !important; }
+  .responsive-table .mobile-cell-label { display: none; }
+  .responsive-table th:has(.grid-sort-button) .grid-sort-button {
+    display: inline !important;
+    padding: 0;
+    color: black;
+    text-decoration: none;
+  }
+  tr { break-inside: avoid; }
+  .calendar-grid { display: grid; }
+}

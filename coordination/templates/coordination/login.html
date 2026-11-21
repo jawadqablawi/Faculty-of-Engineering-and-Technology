@@ -1,10 +1,9 @@
-{% extends 'coordination/base.html' %}
+{% extends 'coordination/auth_shell.html' %}
 {% block title %}تسجيل الدخول · نظام تنسيق الكلية{% endblock %}
-{% block content %}
-<section class="card account-panel">
-  <h1>تسجيل الدخول</h1>
+{% block auth_content %}
   {% include 'coordination/account_fields.html' with submit_label='دخول إلى مساحة العمل' %}
-  <p><a href="{% url 'password_reset' %}">نسيت كلمة المرور؟</a></p>
-  <p class="muted">للحصول على حساب، تواصل مع منسق الكلية.</p>
-</section>
+  <div class="auth-links">
+    <a href="{% url 'password_reset' %}">نسيت كلمة المرور؟</a>
+    <p class="muted">للحصول على حساب، تواصل مع منسق الكلية.</p>
+  </div>
 {% endblock %}

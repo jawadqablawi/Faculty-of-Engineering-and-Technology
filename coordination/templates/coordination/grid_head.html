@@ -1,0 +1,12 @@
+<thead><tr>
+  {% for key, column in table_columns.items %}
+    <th scope="col"{% if table_sort == key %} aria-sort="{% if table_direction == 'desc' %}descending{% else %}ascending{% endif %}"{% endif %}>
+      {% if table_sort == key and table_direction == 'asc' %}
+        <a href="{% querystring sort=key direction='desc' page=None %}">{{ column.0 }} <span aria-hidden="true">↑</span></a>
+      {% else %}
+        <a href="{% querystring sort=key direction='asc' page=None %}">{{ column.0 }}{% if table_sort == key %} <span aria-hidden="true">↓</span>{% endif %}</a>
+      {% endif %}
+    </th>
+  {% endfor %}
+  {% if has_actions %}<th scope="col">الإجراء</th>{% endif %}
+</tr></thead>

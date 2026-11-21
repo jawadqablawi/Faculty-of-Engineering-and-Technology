@@ -1,0 +1,16 @@
+<div class="grid-sort-controls">
+  <label>الفرز حسب
+    <select name="sort">
+      <option value="">الترتيب الافتراضي</option>
+      {% for key, column in table_columns.items %}
+        <option value="{{ key }}"{% if table_sort == key %} selected{% endif %}>{{ column.0 }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>اتجاه الفرز
+    <select name="direction">
+      <option value="asc"{% if table_direction == 'asc' %} selected{% endif %}>تصاعدي</option>
+      <option value="desc"{% if table_direction == 'desc' %} selected{% endif %}>تنازلي</option>
+    </select>
+  </label>
+</div>

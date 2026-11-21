@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.views.decorators.http import require_POST
 from .access import activities, allowed, profile, require
 from .documents import validate_document
+from .table_views import AUDIT_SORT, LETTER_SORT, page_context
 from .forms import PublicationForm, PlanForm
 from .models import (
     Activity,
@@ -299,15 +300,26 @@ def my_tasks(request):
 def audit_log(request):
     if profile(request.user).role != "coordinator":
         raise PermissionDenied
-    rows = Audit.objects.select_related("actor").order_by("-created")
-    if request.GET.get("q"):
-        rows = rows.filter(action__icontains=request.GET["q"])
-    from django.core.paginator import Paginator
+    rows = Audit.objects.select_related("actor")
+    actions = list(rows.order_by("action").values_list("action", flat=True).distinct())
+    if search := request.GET.get("q", "").strip():
+        from django.db.models import Q
 
+        rows = rows.filter(
+            Q(action__icontains=search)
+            | Q(actor__email__icontains=search)
+            | Q(record__icontains=search)
+            | Q(note__icontains=search)
+        )
+    if action := request.GET.get("action"):
+        rows = rows.filter(action=action)
     return render(
         request,
         "coordination/audit.html",
-        {"page": Paginator(rows, 50).get_page(request.GET.get("page"))},
+        {
+            **page_context(request, rows, AUDIT_SORT, "-created", 50),
+            "actions": actions,
+        },
     )
 
 
@@ -362,7 +374,6 @@ def letter_list(request):
     require(request.user, "letters")
     from .models import Letter
     from django.db.models import Q
-    from django.core.paginator import Paginator
 
     rows = (
         Letter.objects.filter(activity__in=activities(request.user))
@@ -385,7 +396,7 @@ def letter_list(request):
         request,
         "coordination/letters.html",
         {
-            "page": Paginator(rows, 30).get_page(request.GET.get("page")),
+            **page_context(request, rows, LETTER_SORT, "-created", 30),
             "states": Letter._meta.get_field("status").choices,
         },
     )

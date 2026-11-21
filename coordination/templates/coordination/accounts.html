@@ -25,7 +25,7 @@
             <form method="post">
               {% csrf_token %}
               <input type="hidden" name="user" value="{{ u.pk }}">
-              <button class="secondary">{{ u.is_active|yesno:'تعطيل,تفعيل' }}</button>
+              <button class="secondary"{% if u.is_active %} data-confirm="تعطيل هذا الحساب؟"{% endif %}>{{ u.is_active|yesno:'تعطيل,تفعيل' }}</button>
             </form>
             {% endif %}
           </div>
@@ -40,7 +40,7 @@
   {% for invitation in invitations %}
   <div class="toolbar">
     <span><bdi>{{ invitation.email }}</bdi> · تنتهي {{ invitation.expires }}</span>
-    <form method="post" action="{% url 'revoke_invitation' invitation.pk %}">
+    <form method="post" data-confirm="إلغاء هذه الدعوة؟" action="{% url 'revoke_invitation' invitation.pk %}">
       {% csrf_token %}<button class="secondary">إلغاء الدعوة</button>
     </form>
   </div>

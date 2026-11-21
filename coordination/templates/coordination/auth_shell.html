@@ -1,0 +1,12 @@
+{% extends 'coordination/base.html' %}
+{% block title %}{{ title }} · نظام تنسيق الكلية{% endblock %}
+{% block content %}
+<section class="card account-panel auth-panel" aria-labelledby="auth-title">
+  <div class="auth-heading">
+    <p class="auth-mark" aria-hidden="true">ETCS</p>
+    <p class="muted">لجنة كلية الهندسة والتكنولوجيا</p>
+    <h1 id="auth-title">{{ title|default:'تسجيل الدخول' }}</h1>
+  </div>
+  {% block auth_content %}{% endblock %}
+</section>
+{% endblock %}

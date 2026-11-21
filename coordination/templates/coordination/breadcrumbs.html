@@ -1,0 +1,11 @@
+{% load workspace_navigation %}
+{% workspace_breadcrumbs identity as crumbs %}
+{% if crumbs %}
+  <nav class="breadcrumbs" aria-label="مسار الصفحة">
+    <ol>
+      {% for label, href in crumbs %}
+        <li>{% if href %}<a href="{{ href }}">{{ label }}</a>{% else %}<span aria-current="page">{{ label }}</span>{% endif %}</li>
+      {% endfor %}
+    </ol>
+  </nav>
+{% endif %}

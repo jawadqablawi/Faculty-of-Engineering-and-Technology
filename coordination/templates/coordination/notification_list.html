@@ -1,0 +1,24 @@
+{% if notifications %}
+<form method="post" action="{% url 'notifications' %}" data-notification-form>
+  {% csrf_token %}
+  <button class="secondary" type="submit">تحديد الكل كمقروء</button>
+</form>
+<ul class="notification-list">
+  {% for n in notifications %}
+    <li data-notification-id="{{ n.pk }}"{% if not n.read %} data-unread{% endif %}>
+      {% if not n.read %}<span class="badge" data-unread-label>جديد</span>{% endif %}
+      {% if n.activity_id %}<a href="{% url 'activity' n.activity_id %}">{{ n.text }}</a>{% else %}<span>{{ n.text }}</span>{% endif %}
+      <small>{{ n.created }}</small>
+      {% if not n.read %}
+        <form method="post" action="{% url 'notifications' %}" data-notification-form data-mark-one>
+          {% csrf_token %}
+          <input type="hidden" name="notification" value="{{ n.pk }}">
+          <button class="secondary" type="submit">تحديد كمقروء</button>
+        </form>
+      {% endif %}
+    </li>
+  {% endfor %}
+</ul>
+{% else %}
+  <p class="muted">لا توجد إشعارات بعد.</p>
+{% endif %}

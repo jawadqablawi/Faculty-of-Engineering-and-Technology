@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}كلية الهندسة والتكنولوجيا{% endblock %}</title>
+  <style>
+    @page { size: {% block paper %}A4 landscape{% endblock %}; margin: 15mm; }
+    body { font: 11pt/1.65 "DejaVu Sans", sans-serif; color: #172733; }
+    h1 { font-size: 17pt; }
+    h1, h2 { break-after: avoid; }
+    table { width: 100%; border-collapse: collapse; }
+    thead { display: table-header-group; }
+    th, td { padding: 6px; border: 1px solid #9daab3; text-align: start; overflow-wrap: anywhere; }
+    th { background: #eef2f4; }
+    tr { break-inside: avoid; }
+    pre { font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body><main>{% block content %}{% endblock %}</main></body>
+</html>

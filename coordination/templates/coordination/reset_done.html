@@ -1,1 +1,9 @@
-{% extends 'coordination/base.html' %}{% block content %}<div class="card"><h1>متابعة استعادة الحساب</h1><p>إذا كان البريد مسجلاً وكان إرسال البريد متاحاً، ستصلك تعليمات الاستعادة. إذا انتهيت من تعيين كلمة المرور، يمكنك تسجيل الدخول.</p><a href="/login/">تسجيل الدخول</a></div>{% endblock %}
+{% extends 'coordination/auth_shell.html' %}
+{% block auth_content %}
+  {% if request.resolver_match.url_name == 'password_reset_complete' %}
+    <p class="muted">تم حفظ كلمة المرور الجديدة. يمكنك تسجيل الدخول بها الآن.</p>
+  {% else %}
+    <p class="muted">إذا كان البريد مسجّلًا وكان إرسال البريد متاحًا، ستصلك تعليمات الاستعادة.</p>
+  {% endif %}
+  <a class="button account-submit" href="{% url 'login' %}">العودة إلى تسجيل الدخول</a>
+{% endblock %}

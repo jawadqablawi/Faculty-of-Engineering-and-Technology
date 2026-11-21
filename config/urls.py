@@ -43,7 +43,8 @@ urlpatterns = [
     path(
         "password-reset/",
         v.LimitedPasswordReset.as_view(
-            template_name="coordination/form.html",
+            template_name="coordination/password_reset.html",
+            extra_context={"title": "نسيت كلمة المرور؟"},
             email_template_name="coordination/reset_email.txt",
         ),
         name="password_reset",
@@ -51,19 +52,24 @@ urlpatterns = [
     path(
         "password-reset/done/",
         auth.PasswordResetDoneView.as_view(
-            template_name="coordination/reset_done.html"
+            template_name="coordination/reset_done.html",
+            extra_context={"title": "متابعة استعادة الحساب"},
         ),
         name="password_reset_done",
     ),
     path(
         "reset/<uidb64>/<token>/",
-        auth.PasswordResetConfirmView.as_view(template_name="coordination/form.html"),
+        auth.PasswordResetConfirmView.as_view(
+            template_name="coordination/password_reset_confirm.html",
+            extra_context={"title": "إعادة تعيين كلمة المرور"},
+        ),
         name="password_reset_confirm",
     ),
     path(
         "reset/done/",
         auth.PasswordResetCompleteView.as_view(
-            template_name="coordination/reset_done.html"
+            template_name="coordination/reset_done.html",
+            extra_context={"title": "تم تعيين كلمة المرور"},
         ),
         name="password_reset_complete",
     ),

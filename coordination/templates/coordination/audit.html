@@ -1,1 +1,29 @@
-{% extends 'coordination/base.html' %}{% load etcs %}{% block content %}<h1>سجل الإجراءات</h1><form method="get" class="toolbar"><input name="q" placeholder="بحث بنوع الإجراء" value="{{ request.GET.q }}"><button>بحث</button></form><div class="card table-wrap"><table><tr><th>التاريخ</th><th>المستخدم</th><th>الإجراء</th><th>السجل</th><th>الملاحظات</th></tr>{% for entry in page %}<tr><td>{{ entry.created }}</td><td>{{ entry.actor.email|default:'النظام' }}</td><td>{{ entry.action|action_label }}</td><td>{{ entry.record }}</td><td>{{ entry.note }}</td></tr>{% endfor %}</table></div><div class="toolbar">{% if page.has_previous %}<a href="?page={{ page.previous_page_number }}&q={{ request.GET.q|urlencode }}">السابق</a>{% endif %}<span>{{ page.number }} / {{ page.paginator.num_pages }}</span>{% if page.has_next %}<a href="?page={{ page.next_page_number }}&q={{ request.GET.q|urlencode }}">التالي</a>{% endif %}</div>{% endblock %}
+{% extends 'coordination/base.html' %}
+{% load etcs %}
+{% block content %}
+<h1>سجل الإجراءات</h1>
+<div data-server-grid>
+  <form method="get" class="card grid-filters" data-grid-form>
+    <label>بحث في السجل<input type="search" name="q" value="{{ request.GET.q }}" placeholder="الإجراء أو المستخدم أو السجل"></label>
+    <label>الإجراء<select name="action">
+      <option value="">كل الإجراءات</option>
+      {% for action in actions %}<option value="{{ action }}"{% if request.GET.action == action %} selected{% endif %}>{{ action|action_label }}</option>{% endfor %}
+    </select></label>
+    {% include 'coordination/grid_sort.html' %}
+    <button>بحث</button>
+  </form>
+  <div class="card" data-grid-results>
+    <div class="table-wrap"><table aria-label="سجل الإجراءات">
+      {% include 'coordination/grid_head.html' %}
+      <tbody>
+        {% for entry in page %}
+        <tr><td>{{ entry.created }}</td><td>{{ entry.actor.email|default:'النظام' }}</td><td>{{ entry.action|action_label }}</td><td>{{ entry.record }}</td><td>{{ entry.note }}</td></tr>
+        {% empty %}
+        <tr data-empty-row><td colspan="5" class="empty">لا توجد إجراءات مطابقة. <a href="{% url 'audit_log' %}">عرض كل الإجراءات</a></td></tr>
+        {% endfor %}
+      </tbody>
+    </table></div>
+    {% include 'coordination/grid_pager.html' %}
+  </div>
+</div>
+{% endblock %}

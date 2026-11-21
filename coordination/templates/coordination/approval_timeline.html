@@ -1,0 +1,23 @@
+{% load static %}
+<link rel="stylesheet" href="{% static 'coordination/css/request-workflow.css' %}">
+<section class="card" aria-labelledby="approval-timeline-title">
+  <h2 id="approval-timeline-title">مراحل اعتماد الطلب</h2>
+  <p class="muted">الحالة الحالية: {{ a.get_status_display }}</p>
+  <ol class="approval-timeline">
+    <li{% if a.status == 'review' or a.status == 'preliminary' or a.status == 'changes' %} aria-current="step"{% elif a.council_approved or a.status == 'council' %} class="step-completed"{% endif %}>
+      <span aria-hidden="true">١</span> المراجعة
+      {% if a.status == 'changes' %}<small>بانتظار تعديلات النادي</small>
+      {% elif a.council_approved or a.status == 'council' %}<small>تمت المراجعة</small>{% endif %}
+    </li>
+    <li{% if a.status == 'council' %} aria-current="step"{% elif a.council_approved %} class="step-completed"{% endif %}>
+      <span aria-hidden="true">٢</span> المجلس
+      {% if a.council_approved %}<small>تمت الموافقة</small>{% endif %}
+    </li>
+    <li{% if a.status == 'approvals' or a.status == 'student_approved' %} aria-current="step"{% elif a.university_approved %} class="step-completed"{% endif %}>
+      <span aria-hidden="true">٣</span> الجامعة
+      {% if a.status == 'approvals' and a.details.simple_request %}<small>بانتظار شؤون الطلبة</small>
+      {% elif a.status == 'student_approved' %}<small>وافقت شؤون الطلبة، بانتظار الاعتماد</small>
+      {% elif a.university_approved %}<small>اعتماد رسمي</small>{% endif %}
+    </li>
+  </ol>
+</section>

@@ -1,1 +1,30 @@
-<div class="table-wrap"><table><thead><tr><th>الطلب / النشاط</th><th>النادي</th><th>النوع والموعد</th><th>الحالة</th><th></th></tr></thead><tbody>{% for a in rows %}<tr><td><strong>{{ a.title }}</strong><br><small dir="ltr">{{ a.number|default:'مسودة' }}</small></td><td>{{ a.club.name }}</td><td>{{ a.get_kind_display }}<br><small>{{ a.date|default:'لم يحدد' }}</small></td><td><span class="badge">{{ a.get_status_display }}</span></td><td><a href="{% url 'activity' a.pk %}">عرض الطلب ←</a></td></tr>{% empty %}<tr><td colspan="5" class="empty">لا توجد طلبات هنا بعد.</td></tr>{% endfor %}</tbody></table></div>
+<div class="table-wrap">
+  <table aria-label="الطلبات">
+    {% if table_columns %}
+      {% include 'coordination/grid_head.html' with has_actions=True %}
+    {% else %}
+      <thead><tr><th scope="col">الطلب / النشاط</th><th scope="col">النادي</th><th scope="col">النوع والموعد</th><th scope="col">الحالة</th><th scope="col">الإجراء</th></tr></thead>
+    {% endif %}
+    <tbody>
+      {% for a in rows %}
+        <tr>
+          <td><strong>{{ a.title }}</strong><br><small dir="ltr">{{ a.number|default:'مسودة' }}</small></td>
+          <td>{{ a.club.name }}</td>
+          <td data-sort="{{ a.date|date:'Y-m-d' }}">{{ a.get_kind_display }}<br><small>{{ a.date|default:'لم يحدد' }}</small></td>
+          <td>{% include 'coordination/status_badge.html' %}</td>
+          <td><a href="{% url 'activity' a.pk %}">عرض الطلب ←</a></td>
+        </tr>
+      {% empty %}
+        <tr data-empty-row><td colspan="5" class="empty">
+          {% if request.GET.q or request.GET.status or request.GET.kind or request.GET.club %}
+            <p>لم نجد طلبات تطابق البحث.</p><a href="{% url 'requests' %}">مسح الفلاتر</a>
+          {% elif identity.role == 'club' %}
+            <p>لا توجد طلبات بعد.</p><a href="{% url 'new_activity' 'event' %}">إنشاء طلب فعالية</a>
+          {% else %}
+            <p>لا توجد طلبات في هذا العرض.</p>{% if request.resolver_match.url_name != 'requests' %}<a href="{% url 'requests' %}">عرض الطلبات الواردة</a>{% endif %}
+          {% endif %}
+        </td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

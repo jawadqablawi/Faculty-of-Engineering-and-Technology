@@ -1,0 +1,7 @@
+{% if page.paginator.num_pages > 1 %}
+<nav class="table-pager" aria-label="صفحات النتائج">
+  {% if page.has_previous %}<a class="button secondary" href="{% querystring page=page.previous_page_number %}">السابق</a>{% endif %}
+  <span>الصفحة {{ page.number }} من {{ page.paginator.num_pages }}</span>
+  {% if page.has_next %}<a class="button secondary" href="{% querystring page=page.next_page_number %}">التالي</a>{% endif %}
+</nav>
+{% endif %}

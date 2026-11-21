@@ -11,6 +11,7 @@ def render_pdf(template, context):
 
         return HTML(string=render_to_string(template, context)).write_pdf()
     from fpdf import FPDF
+    from fpdf.fonts import FontFace
 
     pdf = FPDF(orientation="P" if "letter_print" in template else "L")
     pdf.add_font("ETCS", fname=str(Path(__file__).parent / "assets" / "DejaVuSans.ttf"))
@@ -67,7 +68,9 @@ def render_pdf(template, context):
         if rows:
             pdf.set_font("ETCS", size=9)
             with pdf.table(
-                first_row_as_headings=False, text_align="RIGHT", line_height=7
+                headings_style=FontFace(fill_color=(238, 242, 244)),
+                text_align="RIGHT",
+                line_height=7,
             ) as table:
                 heading = table.row()
                 for cell in reversed(headers):

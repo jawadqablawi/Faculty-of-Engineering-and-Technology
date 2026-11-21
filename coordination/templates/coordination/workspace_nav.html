@@ -1,0 +1,7 @@
+{% load workspace_navigation %}
+{% workspace_links identity as links %}
+<aside class="workspace-nav" id="workspace-nav" aria-label="التنقل الرئيسي">
+  {% for link in links %}
+    {% include 'coordination/nav_link.html' with href=link.href label=link.label icon=link.icon active=link.active only %}
+  {% endfor %}
+</aside>

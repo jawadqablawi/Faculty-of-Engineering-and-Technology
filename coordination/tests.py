@@ -67,6 +67,29 @@ class WorkflowTests(TestCase):
         self.assertContains(r, 'dir="rtl"')
         self.assertContains(r, "البريد الإلكتروني")
 
+    def test_notification_preview_and_mark_read_stay_within_account(self):
+        mine = Notification.objects.create(user=self.a, text="تحديث للحساب الحالي")
+        other = Notification.objects.create(user=self.b, text="تحديث لحساب آخر")
+        url = reverse("notifications")
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.a)
+        preview = client.get(url, {"panel": "1"})
+        self.assertContains(preview, mine.text)
+        self.assertNotContains(preview, other.text)
+        self.assertEqual(client.post(url, {"notification": mine.pk}).status_code, 403)
+        token = client.cookies["csrftoken"].value
+        headers = {"HTTP_X_CSRFTOKEN": token, "HTTP_ACCEPT": "application/json"}
+        self.assertEqual(
+            client.post(url, {"notification": other.pk}, **headers).status_code, 404
+        )
+        self.assertEqual(
+            client.post(url, {"notification": mine.pk}, **headers).json(), {"unread": 0}
+        )
+        mine.refresh_from_db()
+        other.refresh_from_db()
+        self.assertTrue(mine.read)
+        self.assertFalse(other.read)
+
     def test_direct_club_account_logs_in_with_assigned_password_and_name(self):
         create_url = reverse("create_club_account")
         email = "new.manager@example.test"

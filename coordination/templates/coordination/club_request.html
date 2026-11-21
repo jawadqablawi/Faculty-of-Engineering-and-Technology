@@ -1,10 +1,16 @@
 {% extends 'coordination/base.html' %}
 {% block content %}
+{% if editable %}
+  {% include 'coordination/request_stepper.html' with saved=True %}
+  <p class="muted" role="status">الطلب محفوظ ويمكنك متابعة المطبوعات والإرسال.</p>
+{% endif %}
 <div class="section-heading">
   <h1>{{ a.title }}</h1>
-  <span class="badge">{{ a.get_status_display }}</span>
+  {% include 'coordination/status_badge.html' %}
 </div>
 <p>{{ a.club.name }}{% if a.number %} · <bdi>{{ a.number }}</bdi>{% endif %}</p>
+{% if conflicts %}<div class="message warning" role="alert"><strong>تعارض محتمل في المكان.</strong> يوجد حجز معتمد يتداخل مع موعد هذا النشاط. راجع الموعد أو المكان قبل المتابعة.</div>{% endif %}
+{% include 'coordination/approval_timeline.html' %}
 {% if report_note %}<div class="message">{{ report_note|linebreaksbr }}</div>{% endif %}
 {% if last_note %}<div class="message">{{ last_note.note|linebreaksbr }}</div>{% endif %}
 <section class="card">
@@ -30,7 +36,7 @@
       <li>
         <a href="{% url 'download' file.pk %}"><bdi>{{ file.name }}</bdi></a>
         {% if file.print_description or file.purpose %}<p>{% firstof file.print_description file.purpose %}</p>{% endif %}
-        {% if editable %}<form method="post" action="{% url 'delete_attachment' file.pk %}">{% csrf_token %}<button class="secondary">إزالة الملف</button></form>{% endif %}
+        {% if editable %}<form method="post" data-confirm="إزالة هذا المرفق؟" action="{% url 'delete_attachment' file.pk %}">{% csrf_token %}<button class="secondary">إزالة الملف</button></form>{% endif %}
       </li>
     {% empty %}<li class="muted">لا توجد ملفات مرفقة.</li>{% endfor %}
   </ul>
@@ -59,7 +65,7 @@
     <div class="toolbar">
       {% for value, label in next_steps %}<button name="action" value="{{ value }}">{{ label }}</button>{% endfor %}
       {% if a.status == 'review' or a.status == 'preliminary' %}<button class="secondary" name="action" value="changes">طلب تعديل</button>{% endif %}
-      <button class="danger" name="action" value="reject">رفض الطلب</button>
+      <button class="danger" name="action" value="reject" data-confirm="رفض هذا الطلب؟">رفض الطلب</button>
     </div>
   </form>
 </section>

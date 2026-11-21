@@ -31,7 +31,32 @@ with tempfile.TemporaryDirectory(prefix="etcs-smoke-") as scratch:
     manage(
         "shell",
         "-c",
-        "from coordination.models import Club,Profile; from django.contrib.auth.models import User; from django.test import Client; from pathlib import Path; from django.core.management import call_command; import os; call_command('bootstrap'); u=User.objects.create_user('browser@example.test',email='browser@example.test'); Profile.objects.create(user=u,role='club',club=Club.objects.get(name='نادي هندسة الحاسوب'),verified=True); c=Client(); c.force_login(u); Path(os.environ['ETCS_SMOKE_SESSION']).write_text(c.cookies['sessionid'].value)",
+        """
+from datetime import time
+from pathlib import Path
+import os
+from coordination.models import Activity, Club, Notification, Profile
+from django.contrib.auth.models import User
+from django.core.management import call_command
+from django.test import Client
+from django.utils import timezone
+
+call_command("bootstrap")
+club = Club.objects.get(name="نادي هندسة الحاسوب")
+other = Club.objects.exclude(pk=club.pk).first()
+member = User.objects.create_user("browser@example.test", email="browser@example.test")
+Profile.objects.create(user=member, role="club", club=club, verified=True)
+for event_club, title in [(club, "فعالية معتمدة للاختبار"), (other, "حجز متزامن للاختبار")]:
+    Activity.objects.create(
+        club=event_club, creator=member, title=title, kind="event", status="approved",
+        venue="قاعة اختبار", date=timezone.localdate(), start=time(10), end=time(12),
+    )
+Notification.objects.create(user=member, text="إشعار اختباري أول")
+Notification.objects.create(user=member, text="إشعار اختباري ثانٍ")
+client = Client()
+client.force_login(member)
+Path(os.environ["ETCS_SMOKE_SESSION"]).write_text(client.cookies["sessionid"].value)
+""",
     )
     with open(scratch + "/server.log", "w+") as log:
         process = subprocess.Popen(

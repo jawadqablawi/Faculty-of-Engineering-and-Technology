@@ -1,0 +1,51 @@
+<header class="site-header">
+  <div class="workspace-brand">
+    {% if identity %}
+      <button type="button" class="secondary icon-button drawer-toggle" data-dialog-open="workspace-drawer" aria-haspopup="dialog" aria-controls="workspace-drawer" aria-label="فتح القائمة" hidden>{% include 'coordination/icon.html' with icon='menu' %}</button>
+      <button type="button" class="secondary icon-button sidebar-toggle" data-sidebar-toggle aria-controls="workspace-nav" aria-expanded="true" aria-label="طي القائمة" hidden>{% include 'coordination/icon.html' with icon='collapse' %}</button>
+    {% endif %}
+    <div class="site-brand">
+      <strong>تنسيق كلية الهندسة والتكنولوجيا</strong>
+      <small>جامعة فلسطين التقنية – خضوري · ETCS</small>
+    </div>
+  </div>
+  {% if identity %}
+    <form class="workspace-search" role="search" method="get" action="{% url 'requests' %}">
+      <label class="visually-hidden" for="workspace-search">ابحث في الطلبات</label>
+      <input id="workspace-search" type="search" name="q" aria-keyshortcuts="/" placeholder="ابحث في الطلبات" value="{{ request.GET.q|default:'' }}">
+      <button type="submit" class="icon-button" aria-label="بحث">{% include 'coordination/icon.html' with icon='search' %}</button>
+    </form>
+  {% endif %}
+  <div class="toolbar workspace-tools">
+    {% if identity %}
+      <details class="workspace-notifications" data-notification-menu>
+        <summary class="button secondary icon-button" aria-label="الإشعارات، {{ unread_count }} غير مقروء" title="الإشعارات">
+          {% include 'coordination/icon.html' with icon='bell' %}
+          <span class="notification-count" data-unread-count aria-hidden="true"{% if not unread_count %} hidden{% endif %}>{{ unread_count }}</span>
+        </summary>
+        <div class="card notification-panel">
+          <div class="section-heading"><strong>الإشعارات</strong><a href="{% url 'notifications' %}">عرض كل الإشعارات</a></div>
+          <div data-notification-preview data-url="{% url 'notifications' %}?panel=1"></div>
+        </div>
+      </details>
+    {% endif %}
+    <button type="button" class="secondary icon-button" data-theme-toggle aria-label="الوضع الداكن" title="الوضع الداكن" aria-pressed="false" hidden>{% include 'coordination/icon.html' with icon='moon' %}</button>
+    {% if user.is_authenticated %}
+      <details class="workspace-profile">
+        <summary class="button secondary" aria-label="ملف المستخدم" title="ملف المستخدم">
+          {% include 'coordination/icon.html' with icon='user' %}
+          <span class="profile-trigger-label">حسابي</span>
+        </summary>
+        <div class="card workspace-profile-panel">
+          <strong>{% firstof user.get_full_name identity.club.name identity.get_role_display "حساب المستخدم" %}</strong>
+          {% if identity %}<small>{{ identity.get_role_display }}{% if identity.club %} · {{ identity.club.name }}{% endif %}</small>{% endif %}
+          {% if identity %}<label data-shortcut-setting hidden><input type="checkbox" data-search-shortcut checked> تفعيل اختصار البحث (/)</label>{% endif %}
+          <form method="post" action="{% url 'logout' %}">
+            {% csrf_token %}
+            <button class="secondary">خروج</button>
+          </form>
+        </div>
+      </details>
+    {% endif %}
+  </div>
+</header>

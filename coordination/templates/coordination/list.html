@@ -1,1 +1,33 @@
-{% extends 'coordination/base.html' %}{% block content %}<h1>{{ title }}</h1><div class="card"><form class="toolbar" method="get"><input name="q" placeholder="ابحث بالعنوان أو رقم الطلب" value="{{ request.GET.q }}"><select name="status"><option value="">كل الحالات</option>{% for code,label in states %}<option value="{{ code }}" {% if request.GET.status == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select><select name="kind"><option value="">كل الأنشطة</option><option value="event">وجاهي</option><option value="online">إلكتروني</option></select><button>بحث</button></form></div><div class="card">{% include 'coordination/table.html' %}</div>{% endblock %}
+{% extends 'coordination/base.html' %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div data-server-grid>
+  <form class="card grid-filters" method="get" data-grid-form>
+    <label>بحث في الطلبات<input name="q" type="search" value="{{ request.GET.q }}" placeholder="العنوان أو رقم الطلب"></label>
+    <label>الحالة<select name="status">
+      <option value="">كل الحالات</option>
+      <option value="pending"{% if request.GET.status == 'pending' %} selected{% endif %}>الطلبات المعلقة</option>
+      {% for code, label in states %}<option value="{{ code }}"{% if request.GET.status == code %} selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select></label>
+    <label>النوع<select name="kind">
+      <option value="">كل الأنشطة</option>
+      <option value="event"{% if request.GET.kind == 'event' %} selected{% endif %}>وجاهي</option>
+      <option value="online"{% if request.GET.kind == 'online' %} selected{% endif %}>إلكتروني</option>
+    </select></label>
+    {% if identity.role != 'club' %}
+      <label>النادي<select name="club">
+        <option value="">كل النوادي</option>
+        {% for id, name in clubs %}<option value="{{ id }}"{% if request.GET.club == id|stringformat:"s" %} selected{% endif %}>{{ name }}</option>{% endfor %}
+      </select></label>
+    {% elif request.GET.club %}
+      <input type="hidden" name="club" value="{{ request.GET.club }}">
+    {% endif %}
+    {% include 'coordination/grid_sort.html' %}
+    <button type="submit">بحث</button>
+  </form>
+  <div class="card" data-grid-results>
+    {% include 'coordination/table.html' with rows=page %}
+    {% include 'coordination/grid_pager.html' %}
+  </div>
+</div>
+{% endblock %}
