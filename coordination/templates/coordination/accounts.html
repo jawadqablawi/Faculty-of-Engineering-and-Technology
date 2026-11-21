@@ -7,15 +7,16 @@
 </div>
 <div class="card table-wrap">
   <table aria-label="حسابات المستخدمين">
-    <thead><tr><th scope="col">البريد الإلكتروني</th><th scope="col">الدور</th><th scope="col">النادي</th><th scope="col">الحالة</th><th scope="col">الإجراءات</th></tr></thead>
+    <thead><tr><th scope="col">الاسم</th><th scope="col">البريد الإلكتروني</th><th scope="col">الدور</th><th scope="col">النادي</th><th scope="col">الحالة</th><th scope="col">الإجراءات</th></tr></thead>
     <tbody>
       {% for u in users %}
       <tr>
+        <td>{% firstof u.get_full_name u.profile.club.name "—" %}</td>
         <td><bdi>{{ u.email }}</bdi></td>
         <td>{{ u.profile.get_role_display }}</td>
         <td>{{ u.profile.club|default:'—' }}</td>
         <td>
-          {% if not u.is_active %}معطّل{% elif u.profile.must_change_password %}بانتظار تغيير كلمة المرور{% else %}نشط{% endif %}
+          {% if not u.is_active %}معطّل{% else %}نشط{% endif %}
         </td>
         <td>
           <div class="toolbar">

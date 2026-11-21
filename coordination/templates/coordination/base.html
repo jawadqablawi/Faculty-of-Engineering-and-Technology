@@ -20,4 +20,33 @@ header .toolbar span{overflow-wrap:anywhere}
   .toolbar input,.toolbar select{max-width:100%}
   button,.button{min-height:44px}
 }
-</style></head><body><header><div><strong>◈ تنسيق كلية الهندسة والتكنولوجيا</strong><small>جامعة فلسطين التقنية – خضوري · ETCS</small></div>{% if user.is_authenticated %}<div class="toolbar">{% if identity %}<a href="{% url 'notifications' %}">الإشعارات <span class="badge">{{ unread }}</span></a>{% endif %}<span>{{ user.get_full_name|default:user.email }}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="secondary">خروج</button></form></div>{% endif %}</header><div class="layout {% if not identity %}no-sidebar{% endif %}">{% if identity %}<aside aria-label="التنقل الرئيسي"><a href="/">الرئيسية</a><a href="{% url 'requests' %}">{% if admin_mode %}الطلبات الواردة{% else %}طلباتي ومتابعتها{% endif %}</a>{% if not admin_mode %}<a href="{% url 'new_activity' 'event' %}">فعالية وجاهية جديدة</a><a href="{% url 'new_activity' 'online' %}">ورشة إلكترونية جديدة</a>{% endif %}{% if can_requests %}<a href="{% url 'requests' %}?status=approved">الفعاليات والورشات</a>{% endif %}{% if can_letters %}<a href="{% url 'letters' %}">الكتب الرسمية</a>{% endif %}{% if can_cases %}<a href="{% url 'records' 'cases' %}">شؤون الطلبة</a>{% endif %}{% if identity.role == 'coordinator' %}<a href="{% url 'clubs' %}">النوادي والتقويم</a>{% else %}<a href="{% url 'calendar' %}">تقويم الأنشطة</a>{% endif %}<details><summary>المزيد</summary><a href="{% url 'my_tasks' %}">المهام المسندة إليّ</a>{% if identity.role == 'club' %}<a href="{% url 'club_profile' identity.club_id %}">ملف النادي والخطة الشهرية</a><a href="{% url 'club_meetings' %}">اجتماعات النادي</a>{% endif %}{% if can_operations %}<a href="{% url 'records' 'tasks' %}">المهام</a><a href="{% url 'records' 'meetings' %}">الاجتماعات</a>{% endif %}{% if can_reports %}<a href="{% url 'reports' %}">التقارير والأرشيف</a>{% endif %}{% if identity.role == 'club' or can_requests %}<a href="{% url 'records' 'ideas' %}">الأفكار الأولية</a>{% endif %}{% if identity.role == 'coordinator' %}<a href="{% url 'records' 'clubs' %}">إدارة النوادي</a><a href="{% url 'accounts' %}">المستخدمون والدعوات</a><a href="{% url 'settings' %}">الإعدادات</a><a href="{% url 'audit_log' %}">سجل الإجراءات</a>{% endif %}</details></aside>{% endif %}<main>{% for m in messages %}<div class="message {{ m.tags }}" role="{% if m.level >= 40 %}alert{% else %}status{% endif %}">{{ m }}</div>{% endfor %}{% block content %}{% endblock %}</main></div><footer>نظام تنسيق كلية الهندسة والتكنولوجيا · التوقيت: فلسطين · العملة: شيكل</footer></body></html>
+
+.workspace-nav{display:flex;flex-direction:column;gap:4px;align-items:stretch}
+.workspace-nav a[aria-current=page]{background:#eaf1fb;color:var(--blue);font-weight:bold}
+.section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.request-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.request-fields .wide{grid-column:1/-1}
+.needs-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(5rem,1fr) auto;gap:10px;align-items:end;margin:12px 0}
+.needs-row label{margin:0}
+.file-list{padding:0;list-style:none}
+.file-list li{border-block-end:1px solid var(--line);padding:12px 0;overflow-wrap:anywhere}
+.file-list p{margin:4px 0;white-space:pre-wrap}
+@media(max-width:800px){.workspace-nav{flex-direction:row;flex-wrap:wrap}}
+@media(max-width:600px){
+  .request-fields{grid-template-columns:1fr}
+  .needs-row{grid-template-columns:minmax(0,1fr) 5.5rem}
+  .needs-row .remove-need{grid-column:1/-1;justify-self:start}
+}
+</style></head><body><header><div><strong>◈ تنسيق كلية الهندسة والتكنولوجيا</strong><small>جامعة فلسطين التقنية – خضوري · ETCS</small></div>{% if user.is_authenticated %}<div class="toolbar"><span>{% firstof user.get_full_name identity.club.name identity.get_role_display "حساب المستخدم" %}</span><form method="post" action="{% url 'logout' %}">{% csrf_token %}<button class="secondary">خروج</button></form></div>{% endif %}</header><div class="layout {% if not identity %}no-sidebar{% endif %}">{% if identity %}
+<aside class="workspace-nav" aria-label="التنقل الرئيسي">
+  <a href="{% url 'home' %}" {% if request.resolver_match.url_name == 'home' %}aria-current="page"{% endif %}>الرئيسية</a>
+  {% if identity.role == 'club' %}
+    <a href="{% url 'requests' %}" {% if request.resolver_match.url_name == 'requests' %}aria-current="page"{% endif %}>طلباتي ومتابعتها</a>
+    <a href="{% url 'new_activity' 'event' %}">فعالية وجاهية جديدة</a>
+    <a href="{% url 'new_activity' 'online' %}">ورشة إلكترونية جديدة</a>
+    <a href="{% url 'calendar' %}" {% if request.resolver_match.url_name == 'calendar' %}aria-current="page"{% endif %}>تقويم الأنشطة</a>
+  {% else %}
+    <a href="{% url 'requests' %}" {% if request.resolver_match.url_name == 'requests' %}aria-current="page"{% endif %}>الطلبات الواردة</a>
+  {% endif %}
+</aside>
+{% endif %}<main>{% for m in messages %}<div class="message {{ m.tags }}" role="{% if m.level >= 40 %}alert{% else %}status{% endif %}">{{ m }}</div>{% endfor %}{% block content %}{% endblock %}</main></div><footer>نظام تنسيق كلية الهندسة والتكنولوجيا · التوقيت: فلسطين · العملة: شيكل</footer></body></html>

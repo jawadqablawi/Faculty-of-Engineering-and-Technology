@@ -3,7 +3,6 @@ from datetime import timedelta, datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from django.shortcuts import render, redirect, get_object_or_404
-from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import (
     SetPasswordForm,
@@ -76,11 +75,6 @@ class SecureLogin(LoginView):
             )
         return super().post(request, *a, **kw)
 
-    def get_success_url(self):
-        if self.request.user.profile.must_change_password:
-            return reverse("first_password_change")
-        return super().get_success_url()
-
     def form_valid(self, form):
         try:
             profile(form.get_user())
@@ -95,8 +89,6 @@ def context(request):
         return {}
     try:
         p = profile(request.user)
-        if p.must_change_password:
-            return {}
         return {
             "identity": p,
             "upload_limit_mb": settings.ETCS_MAX_UPLOAD_BYTES // (1024 * 1024),
@@ -106,9 +98,6 @@ def context(request):
             "can_operations": allowed(request.user, "operations"),
             "can_reports": allowed(request.user, "reports"),
             "can_letters": allowed(request.user, "letters"),
-            "unread": Notification.objects.filter(
-                user=request.user, read=False
-            ).count(),
         }
     except PermissionDenied:
         return {}
@@ -117,66 +106,38 @@ def context(request):
 @login_required
 def home(request):
     p = profile(request.user)
-    q = activities(request.user)
+    requests = activities(request.user)
+    stats = []
+    if p.role != "club":
+        for status, label in [
+            ("review", "الطلبات الجديدة"),
+            ("council", "قيد الموافقة من المجلس"),
+            ("student_approved", "الموافق عليها من شؤون الطلبة"),
+            ("approved", "المعتمدة رسميًا"),
+        ]:
+            states = ["approved", "completed"] if status == "approved" else [status]
+            stats.append((status, label, requests.filter(status__in=states).count()))
+        requests = requests.filter(status="review")
     return render(
-        request,
-        "coordination/home.html",
-        {
-            "recent": q[:8],
-            "new_count": q.filter(status="review").count(),
-            "pending_count": q.filter(status__in=["council", "approvals"]).count(),
-            "upcoming_count": q.filter(
-                status="approved", date__gte=timezone.localdate()
-            ).count(),
-            "case_count": (
-                Case.objects.all()
-                if p.role == "coordinator"
-                else Case.objects.filter(assigned=request.user)
-            )
-            .exclude(status__in=["تم الحل", "مغلق"])
-            .count()
-            if allowed(request.user, "cases")
-            else 0,
-            "changes_waiting": q.filter(status="changes")[:5],
-            "late_letters": Letter.objects.filter(
-                activity__in=q, follow_up__lt=timezone.localdate()
-            ).exclude(status="مغلق")[:5]
-            if allowed(request.user, "letters")
-            else [],
-            "late_tasks": (
-                Task.objects.all()
-                if p.role == "coordinator"
-                else Task.objects.filter(assigned=request.user)
-            )
-            .filter(due__lt=timezone.localdate())
-            .exclude(status="مكتملة")[:5]
-            if allowed(request.user, "operations")
-            else [],
-            "case_followups": (
-                Case.objects.all()
-                if p.role == "coordinator"
-                else Case.objects.filter(assigned=request.user)
-            )
-            .filter(follow_up__lte=timezone.localdate())
-            .exclude(status__in=["تم الحل", "مغلق"])[:5]
-            if allowed(request.user, "cases")
-            else [],
-            "upcoming": q.filter(
-                status="approved", date__gte=timezone.localdate()
-            ).order_by("date")[:5],
-        },
+        request, "coordination/home.html", {"recent": requests[:8], "stats": stats}
     )
 
 
 @login_required
 def request_list(request):
+    p = profile(request.user)
     q = activities(request.user)
+    if p.role != "club":
+        q = q.exclude(status="draft")
     if request.GET.get("q"):
         q = q.filter(
             Q(title__icontains=request.GET["q"]) | Q(number__icontains=request.GET["q"])
         )
     if request.GET.get("status"):
-        q = q.filter(status=request.GET["status"])
+        status = request.GET["status"]
+        q = q.filter(
+            status__in=["approved", "completed"] if status == "approved" else [status]
+        )
     if request.GET.get("kind"):
         q = q.filter(kind=request.GET["kind"])
     if request.GET.get("club"):
@@ -186,7 +147,11 @@ def request_list(request):
     return render(
         request,
         "coordination/list.html",
-        {"title": "الطلبات ومتابعتها", "rows": q, "states": Activity.STATES},
+        {
+            "title": "طلباتي ومتابعتها" if p.role == "club" else "الطلبات الواردة",
+            "rows": q,
+            "states": Activity.STATES,
+        },
     )
 
 
@@ -194,142 +159,80 @@ def request_list(request):
 @transaction.atomic
 def edit_activity(request, kind="event", pk=None):
     p = profile(request.user)
-    if kind not in ["event", "online"]:
+    if p.role != "club" or kind not in {"event", "online"}:
         raise PermissionDenied
-    if p.role != "club":
-        raise PermissionDenied
-    if not pk and request.method == "POST" and request.POST.get("draft_token"):
-        try:
-            token = signing.loads(
-                request.POST["draft_token"], salt="etcs-draft", max_age=86400
-            )
-        except signing.BadSignature:
-            raise PermissionDenied
-        if (
-            token.get("user") != request.user.pk
-            or token.get("club") != p.club_id
-            or token.get("kind") != kind
-        ):
-            raise PermissionDenied
-        # A stable, signed draft ID makes retry/autosave/manual-submit requests idempotent.
-        stored, _ = Activity.objects.get_or_create(
-            pk=token["id"],
-            defaults={
-                "club": p.club,
-                "creator": request.user,
-                "kind": kind,
-                "title": "",
-            },
-        )
-        pk = stored.pk
     a = (
-        get_object_or_404(activities(request.user).select_for_update(), pk=pk)
+        get_object_or_404(
+            activities(request.user).select_for_update(of=("self",)), pk=pk
+        )
         if pk
         else Activity(club=p.club, creator=request.user, kind=kind)
     )
-    if a.status not in ["draft", "changes"]:
+    if a.status not in {"draft", "changes"}:
         raise PermissionDenied
-    kind = a.kind
-    form = ActivityForm(request.POST or None, instance=a, kind=kind)
-    detail = DetailsForm(
-        request.POST or None, initial=a.details, kind=kind, prefix="detail"
-    )
-    reqs = Requirements(
-        request.POST or None, initial=a.details.get("requirements", []), prefix="req"
-    )
-    sessions = Sessions(
-        request.POST or None, initial=a.details.get("sessions", []), prefix="session"
-    )
-    extras = (
-        [
-            (
-                label,
-                key,
-                factory(
-                    request.POST or None, initial=a.details.get(key, []), prefix=key
-                ),
-            )
-            for label, key, factory in [
-                ("برنامج الفعالية", "program", Programs),
-                ("المتحدثون والضيوف", "speakers", Speakers),
-                ("الشراكات", "partners", Partners),
-                ("مواعيد إضافية للفعالية", "extra_dates", ExtraDates),
-            ]
-        ]
-        if kind == "event"
-        else []
-    )
-    valid = form.is_valid() if request.method == "POST" else False
-    if request.method == "POST":
-        valid = detail.is_valid() and valid
-        valid = (reqs.is_valid() if kind == "event" else sessions.is_valid()) and valid
-        for _, _, fs in extras:
-            valid = fs.is_valid() and valid
-        if valid:
-            a = form.save(commit=False)
-            d = detail.cleaned_data
-            if kind == "event":
-                d["requirements"] = [
-                    {
-                        k: str(v) if k in ["quantity", "price"] else v
-                        for k, v in x.items()
-                        if k != "DELETE"
-                    }
-                    for x in reqs.cleaned_data
-                    if x and not x.get("DELETE")
-                ]
-                for x in d["requirements"]:
-                    if x["available"] or not x["price"] or x["price"] == "None":
-                        x["price"] = "0"
-            else:
-                d["sessions"] = [
-                    {k: str(v) for k, v in x.items() if k != "DELETE"}
-                    for x in sessions.cleaned_data
-                    if x and not x.get("DELETE")
-                ]
-            for _, key, fs in extras:
-                d[key] = [
-                    {
-                        k: str(v) if not isinstance(v, (bool, int)) else v
-                        for k, v in x.items()
-                        if k != "DELETE"
-                    }
-                    for x in fs.cleaned_data
-                    if x and not x.get("DELETE")
-                ]
-            d = json.loads(json.dumps(d, default=str, ensure_ascii=False))
-            a.details = d
-            a.save()
-            if kind == "event":
-                a.event_dates.all().delete()
-                for row in d.get("extra_dates", []):
-                    EventDate.objects.create(activity=a, **row)
-            else:
-                a.workshop_sessions.all().delete()
-                for row in d.get("sessions", []):
-                    WorkshopSession.objects.create(activity=a, **row)
 
-            audit(request.user, "save_draft", a.pk)
-            if request.POST.get("autosave"):
-                return JsonResponse(
+    data = request.POST if request.method == "POST" else None
+    if not pk and data is not None and data.get("draft_token"):
+        try:
+            token = signing.loads(
+                data["draft_token"], salt="club-request", max_age=86400
+            )
+        except signing.BadSignature:
+            raise PermissionDenied
+        if (token["user"], token["club"], token["kind"]) != (
+            request.user.pk,
+            p.club_id,
+            kind,
+        ):
+            raise PermissionDenied
+        a.pk = token["id"]
+        if activities(request.user).filter(pk=a.pk).exists():
+            return redirect("activity", a.pk)
+    form = ClubRequestForm(data, instance=a)
+    previous_needs = a.details.get("requirements", [])
+    needs = ClubNeeds(
+        data,
+        initial=[
+            {"item": row.get("item"), "quantity": row.get("quantity")}
+            for row in previous_needs
+        ],
+        prefix="needs",
+    )
+    if request.method == "POST":
+        valid = form.is_valid()
+        if needs.is_valid() and valid:
+            a = form.save(commit=False)
+            a.details = {
+                **a.details,
+                "simple_request": True,
+                "requirements": [
                     {
-                        "saved": True,
-                        "url": reverse("edit_activity", args=[a.pk]),
-                        "time": timezone.now().isoformat(),
+                        **(
+                            previous_needs[index] if index < len(previous_needs) else {}
+                        ),
+                        "item": row["item"],
+                        "quantity": str(row["quantity"]),
                     }
-                )
-            messages.success(request, "تم حفظ البيانات")
+                    for index, row in enumerate(needs.cleaned_data)
+                    if row and not row.get("DELETE")
+                ],
+            }
+            try:
+                with transaction.atomic():
+                    a.save(force_insert=not pk)
+            except IntegrityError:
+                if pk or not activities(request.user).filter(pk=a.pk).exists():
+                    raise
+                return redirect("activity", a.pk)
+            audit(request.user, "save_draft", a.pk)
             return redirect("activity", a.pk)
     return render(
         request,
-        "coordination/activity_form.html",
+        "coordination/club_request_form.html",
         {
             "form": form,
-            "detail": detail,
-            "formset": reqs if kind == "event" else sessions,
-            "kind": kind,
-            "activity": a if a.pk and not a._state.adding else None,
-            "extras": extras,
+            "needs": needs,
+            "a": a,
             "draft_token": signing.dumps(
                 {
                     "id": str(a.pk),
@@ -337,8 +240,10 @@ def edit_activity(request, kind="event", pk=None):
                     "club": p.club_id,
                     "kind": kind,
                 },
-                salt="etcs-draft",
-            ),
+                salt="club-request",
+            )
+            if not pk
+            else "",
         },
     )
 
@@ -346,6 +251,36 @@ def edit_activity(request, kind="event", pk=None):
 @login_required
 def activity(request, pk):
     a = get_object_or_404(activities(request.user), pk=pk)
+    p = profile(request.user)
+    if p.role == "club" or a.details.get("simple_request"):
+        steps = {
+            "review": [("forward", "إحالة إلى المجلس")],
+            "preliminary": [("forward", "إحالة إلى المجلس")],
+            "council": [("council_ok", "تسجيل موافقة المجلس")],
+            "approvals": [("student_ok", "تسجيل موافقة شؤون الطلبة")],
+            "student_approved": [("university_ok", "اعتماد رسمي")],
+        }
+        return render(
+            request,
+            "coordination/club_request.html",
+            {
+                "a": a,
+                "editable": p.role == "club" and a.status in {"draft", "changes"},
+                "requirements": a.details.get("requirements", []),
+                "attachments": a.attachments.filter(deleted=False).order_by("created"),
+                "last_note": a.history.filter(status__in=["changes", "rejected"])
+                .exclude(note="")
+                .last()
+                if a.status in {"changes", "rejected"}
+                else None,
+                "next_steps": steps.get(a.status, [])
+                if allowed(request.user, "requests", True)
+                else [],
+                "report_note": a.report.correction_note
+                if not a.details.get("simple_request") and hasattr(a, "report")
+                else "",
+            },
+        )
     from .scheduling import has_conflicts
 
     conflicts = has_conflicts(a)
@@ -405,11 +340,21 @@ def action(request, pk):
 
 @login_required
 @require_POST
+@transaction.atomic
 def upload(request, pk):
-    a = get_object_or_404(activities(request.user), pk=pk)
+    a = get_object_or_404(
+        activities(request.user).select_for_update(of=("self",)), pk=pk
+    )
     p = profile(request.user)
     if p.role != "club" or a.status not in ["draft", "changes", "approved"]:
         raise PermissionDenied
+    printing = a.details.get("simple_request") or request.POST.get("printing") == "1"
+    description = request.POST.get("description", "").strip()
+    if printing and (
+        a.status not in {"draft", "changes"} or not 1 <= len(description) <= 500
+    ):
+        messages.error(request, "اكتب وصفًا للملف من حرف إلى 500 حرف قبل الإرسال.")
+        return redirect("activity", pk)
     f = request.FILES.get("file")
     try:
         original, checksum = validate_document(f)
@@ -441,6 +386,7 @@ def upload(request, pk):
             uploader=request.user,
             checksum=checksum,
             purpose=request.POST.get("purpose", "")[:100],
+            print_description=description if printing else "",
             supersedes=previous,
             version=previous.version + 1 if previous else 1,
         )
@@ -471,20 +417,23 @@ def download(request, pk):
 
 @login_required
 @require_POST
+@transaction.atomic
 def delete_attachment(request, pk):
     f = get_object_or_404(
         Attachment, pk=pk, activity__in=activities(request.user), deleted=False
     )
-    if profile(request.user).role != "club" or f.activity.status not in [
+    a = get_object_or_404(
+        activities(request.user).select_for_update(of=("self",)), pk=f.activity_id
+    )
+    if profile(request.user).role != "club" or a.status not in [
         "draft",
         "changes",
     ]:
         raise PermissionDenied
-    a = f.activity_id
     audit(request.user, "delete_attachment", f.pk, f.name)
     f.deleted = True
     f.save(update_fields=["deleted"])
-    return redirect("activity", a)
+    return redirect("activity", a.pk)
 
 
 @login_required
@@ -737,14 +686,7 @@ def calendar(request):
     from .scheduling import public_calendar
 
     q = public_calendar()
-    own = (
-        activities(request.user)
-        .exclude(status__in=["approved", "rejected", "cancelled", "completed", "draft"])
-        .values("title", "date", "start", "end", "club__name", "kind")
-    )
-    return render(
-        request, "coordination/calendar.html", {"events": list(q), "pending": list(own)}
-    )
+    return render(request, "coordination/calendar.html", {"events": q})
 
 
 @login_required
@@ -1051,48 +993,6 @@ def accept(request, token):
     )
 
 
-@sensitive_post_parameters("new_password1", "new_password2")
-@never_cache
-@login_required
-@transaction.atomic
-def first_password_change(request):
-    current_profile = profile(request.user)
-    if not current_profile.must_change_password:
-        return redirect("home")
-
-    user = request.user
-    if request.method == "POST":
-        user = User.objects.select_for_update().get(pk=user.pk)
-        current_profile.refresh_from_db(fields=["must_change_password"])
-        if (
-            not current_profile.must_change_password
-            or user.password != request.user.password
-        ):
-            return redirect("login")
-
-    form = FirstPasswordForm(user, request.POST if request.method == "POST" else None)
-    if request.method == "POST" and form.is_valid():
-        form.save()
-        current_profile.must_change_password = False
-        current_profile.save(update_fields=["must_change_password"])
-        update_session_auth_hash(request, user)
-        audit(user, "change_temporary_password", user.pk)
-        messages.success(
-            request, "تم تحديث كلمة المرور. يمكنك الآن استخدام مساحة النادي."
-        )
-        return redirect("home")
-    return render(
-        request,
-        "coordination/account_form.html",
-        {
-            "form": form,
-            "title": "تغيير كلمة المرور المؤقتة",
-            "description": "اختر كلمة مرور جديدة لتتمكن من دخول مساحة النادي.",
-            "submit_label": "حفظ كلمة المرور والدخول",
-        },
-    )
-
-
 @sensitive_post_parameters("temporary_password")
 @never_cache
 @login_required
@@ -1109,6 +1009,7 @@ def create_club_account(request):
                     username=email,
                     email=email,
                     password=form.cleaned_data["temporary_password"],
+                    first_name=form.cleaned_data["first_name"],
                 )
                 club = form.cleaned_data["club"]
                 Profile.objects.create(
@@ -1116,7 +1017,6 @@ def create_club_account(request):
                     role="club",
                     club=club,
                     verified=True,
-                    must_change_password=True,
                 )
                 audit(request.user, "create_club_account", user.pk, str(club.pk))
         except IntegrityError:
@@ -1136,7 +1036,7 @@ def create_club_account(request):
         {
             "form": form,
             "title": "إنشاء حساب نادي",
-            "description": "سلّم البريد وكلمة المرور المؤقتة لمسؤول النادي مباشرةً. سيُطلب منه تغييرها عند أول دخول.",
+            "description": "سلّم البريد وكلمة المرور لمسؤول النادي مباشرةً.",
             "submit_label": "إنشاء الحساب",
             "back_to_accounts": True,
         },
@@ -1169,12 +1069,16 @@ def accounts(request):
 
 
 @login_required
+@transaction.atomic
 def permissions(request, pk):
     if profile(request.user).role != "coordinator":
         raise PermissionDenied
     target = get_object_or_404(Profile, user_id=pk)
 
     class PermissionForm(forms.ModelForm):
+        first_name = forms.CharField(
+            label="الاسم المعروض", max_length=150, required=False
+        )
         modules = forms.MultipleChoiceField(
             label="الوحدات المسموحة",
             required=False,
@@ -1213,9 +1117,19 @@ def permissions(request, pk):
         "modules": list(target.modules),
         "clubs": list(target.clubs.values_list("pk", flat=True)),
     }
-    form = PermissionForm(request.POST or None, instance=target)
+    form = PermissionForm(
+        request.POST or None,
+        instance=target,
+        initial={"first_name": target.user.first_name},
+    )
     if request.method == "POST" and form.is_valid():
         form.save()
+        if (
+            "first_name" in request.POST
+            and target.user.first_name != form.cleaned_data["first_name"]
+        ):
+            target.user.first_name = form.cleaned_data["first_name"]
+            target.user.save(update_fields=["first_name"])
         if target.role != "coordinator" and (
             target.user.is_staff or target.user.is_superuser
         ):

@@ -67,70 +67,49 @@ class WorkflowTests(TestCase):
         self.assertContains(r, 'dir="rtl"')
         self.assertContains(r, "البريد الإلكتروني")
 
-    def test_direct_club_account_first_login_and_scope(self):
+    def test_direct_club_account_logs_in_with_assigned_password_and_name(self):
         create_url = reverse("create_club_account")
-        change_url = reverse("first_password_change")
         email = "new.manager@example.test"
-        temporary = "Synthetic-temp-642!r"
-        permanent = "Synthetic-new-831!w"
+        password = "Synthetic-temp-642!r"
         data = {
+            "first_name": "مسؤول نادي البناء",
             "email": email.upper(),
             "club": self.civil.pk,
-            "temporary_password": temporary,
+            "temporary_password": password,
         }
-        self.login(self.a)
-        self.assertEqual(self.client.post(create_url, data).status_code, 403)
-        self.login(self.deputy)
-        self.assertEqual(self.client.post(create_url, data).status_code, 403)
-
+        for user in (self.a, self.deputy):
+            self.login(user)
+            self.assertEqual(self.client.post(create_url, data).status_code, 403)
         self.login(self.admin)
         self.assertRedirects(self.client.post(create_url, data), reverse("accounts"))
         self.assertEqual(mail.outbox, [])
         account = User.objects.get(email=email)
-        self.assertTrue(account.check_password(temporary))
+        self.assertTrue(account.check_password(password))
         self.assertEqual(account.profile.club, self.civil)
         self.assertEqual(account.profile.role, "club")
-        self.assertTrue(account.profile.must_change_password)
         self.assertFalse(account.is_staff)
-        self.assertFalse(account.is_superuser)
-        self.assertContains(self.client.get(reverse("accounts")), "بانتظار تغيير كلمة المرور")
         duplicate = self.client.post(create_url, data)
         self.assertContains(duplicate, "يوجد حساب لهذا البريد")
-        self.assertNotContains(duplicate, temporary)
+        self.assertNotContains(duplicate, password)
         self.assertEqual(User.objects.filter(email__iexact=email).count(), 1)
 
-        club = Client()
-        login_url = reverse("login")
-        credentials = {"username": email, "password": temporary}
-        self.assertRedirects(
-            club.post(login_url, {**credentials, "next": reverse("requests")}), change_url
-        )
-        for url in (reverse("requests"), reverse("accounts"), "/admin/", reverse("calendar_export")):
-            self.assertRedirects(club.get(url), change_url, fetch_redirect_response=False)
-            self.assertRedirects(club.post(url), change_url, fetch_redirect_response=False)
-        other_session = Client()
-        self.assertRedirects(other_session.post(login_url, credentials), change_url)
-
-        reused = club.post(change_url, {"new_password1": temporary, "new_password2": temporary})
-        self.assertContains(reused, "اختر كلمة مرور مختلفة")
-        account.profile.refresh_from_db()
-        self.assertTrue(account.profile.must_change_password)
-        self.assertRedirects(
-            club.post(change_url, {"new_password1": permanent, "new_password2": permanent}),
-            reverse("home"),
-        )
-        account.refresh_from_db()
-        self.assertTrue(account.check_password(permanent))
-        self.assertFalse(account.check_password(temporary))
-        self.assertFalse(account.profile.must_change_password)
-        self.assertEqual(club.get(reverse("club_profile", args=[self.civil.pk])).status_code, 200)
-        self.assertEqual(club.get(reverse("activity", args=[self.activity.pk])).status_code, 404)
-        self.assertNotContains(club.get(reverse("requests")), self.activity.title)
-        self.assertRedirects(other_session.get(reverse("requests")), login_url + "?next=/requests/")
-        self.assertContains(Client().post(login_url, credentials), "تسجيل الدخول")
-        self.assertRedirects(
-            Client().post(login_url, {"username": email, "password": permanent}), reverse("home")
-        )
+        for previously_pending in (False, True):
+            account.profile.must_change_password = previously_pending
+            account.profile.save(update_fields=["must_change_password"])
+            client = Client()
+            self.assertRedirects(
+                client.post(
+                    reverse("login"), {"username": email, "password": password}
+                ),
+                reverse("home"),
+            )
+            home = client.get(reverse("home"))
+            self.assertContains(home, data["first_name"])
+            self.assertNotContains(home, email)
+            self.assertEqual(
+                client.get(reverse("activity", args=[self.activity.pk])).status_code,
+                404,
+            )
 
     def test_direct_club_account_rejects_inactive_club(self):
         self.civil.active = False
@@ -139,7 +118,12 @@ class WorkflowTests(TestCase):
         email = "inactive.club@example.test"
         response = self.client.post(
             reverse("create_club_account"),
-            {"email": email, "club": self.civil.pk, "temporary_password": "Synthetic-temp-642!r"},
+            {
+                "first_name": "اسم المسؤول",
+                "email": email,
+                "club": self.civil.pk,
+                "temporary_password": "Synthetic-temp-642!r",
+            },
         )
         self.assertTrue(response.context["form"].errors.get("club"))
         self.assertFalse(User.objects.filter(email=email).exists())
@@ -240,39 +224,114 @@ class WorkflowTests(TestCase):
         self.a.save()
         self.assertEqual(self.client.get("/requests/").status_code, 302)
 
-    def test_forms_save_real_draft_and_ignore_forged_club(self):
+    def test_simple_request_from_draft_to_official_calendar(self):
         self.login(self.a)
         payload = {
-            "title": "طلب محفوظ",
-            "participants": "12",
+            "title": "المهارات الحياتية لسوق العمل",
+            "description": "وصف خاص بمسؤول النادي",
+            "date": str(timezone.localdate() + timedelta(days=7)),
+            "venue": "قاعة الكلية",
             "club": self.civil.pk,
-            "req-TOTAL_FORMS": "1",
-            "req-INITIAL_FORMS": "0",
-            "req-0-category": "حواسيب",
-            "req-0-item": "حاسوب",
-            "req-0-quantity": "2",
-            "req-0-price": "30",
-            "req-0-unit": "جهاز",
+            "needs-TOTAL_FORMS": "2",
+            "needs-INITIAL_FORMS": "0",
+            "needs-0-item": "عصير",
+            "needs-0-quantity": "100",
+            "needs-1-item": "كاسات كرتون",
+            "needs-1-quantity": "60",
+            "needs-1-price": "500",
         }
-        payload.update(
-            {
-                f"{key}-{suffix}": value
-                for key in ["program", "speakers", "partners", "extra_dates"]
-                for suffix, value in [("TOTAL_FORMS", "1"), ("INITIAL_FORMS", "0")]
-            }
-        )
-        r = self.client.post("/new/event/", payload)
-        self.assertEqual(r.status_code, 302)
-        a = Activity.objects.get(title="طلب محفوظ")
+        response = self.client.post("/new/event/", payload)
+        self.assertEqual(response.status_code, 302)
+        a = Activity.objects.get(title=payload["title"])
         self.assertEqual(a.club, self.computer)
-        self.assertEqual(a.budget, 60)
-        self.assertContains(self.client.get(r.url), "طلب محفوظ")
-        self.assertEqual(self.client.get(f"/requests/{a.pk}/edit/").status_code, 200)
-        a.status = "review"
-        a.save()
         self.assertEqual(
-            self.client.post(f"/requests/{a.pk}/edit/", payload).status_code, 403
+            a.details["requirements"],
+            [
+                {"item": "عصير", "quantity": "100"},
+                {"item": "كاسات كرتون", "quantity": "60"},
+            ],
         )
+        self.assertContains(self.client.get(response.url), "المطبوعات")
+        upload_url = reverse("upload", args=[a.pk])
+        for description in ("", "اطبع 60 نسخة"):
+            self.client.post(
+                upload_url,
+                {
+                    "file": SimpleUploadedFile("poster.pdf", b"%PDF-1.4\nPrint this"),
+                    "description": description,
+                },
+            )
+        attachment = a.attachments.get()
+        self.assertEqual(attachment.print_description, "اطبع 60 نسخة")
+        self.assertContains(self.client.get(response.url), attachment.print_description)
+
+        coordinator = Client()
+        coordinator.force_login(self.admin)
+        self.assertNotContains(coordinator.get(reverse("requests")), a.title)
+        self.login(self.a)
+        self.client.post(reverse("action", args=[a.pk]), {"action": "submit"})
+        dashboard = coordinator.get(reverse("home"))
+        self.assertEqual(
+            [status for status, _, _ in dashboard.context["stats"]],
+            [
+                "review",
+                "council",
+                "student_approved",
+                "approved",
+            ],
+        )
+        self.assertEqual(dashboard.context["stats"][0][2], 1)
+        self.assertEqual(
+            self.client.post(
+                reverse("edit_activity", args=[a.pk]), payload
+            ).status_code,
+            403,
+        )
+        other = Client()
+        other.force_login(self.b)
+        self.assertEqual(other.get(response.url).status_code, 404)
+        self.assertEqual(
+            other.get(reverse("download", args=[attachment.pk])).status_code, 404
+        )
+        self.assertNotIn(
+            a.title,
+            [
+                event["title"]
+                for event in other.get(reverse("calendar")).context["events"]
+            ],
+        )
+        for action, status in [
+            ("forward", "council"),
+            ("council_ok", "approvals"),
+            ("student_ok", "student_approved"),
+            ("university_ok", "approved"),
+        ]:
+            transition(self.admin, a.pk, action, "مرجع القرار")
+            a.refresh_from_db()
+            self.assertEqual(a.status, status)
+            if status in {"council", "student_approved", "approved"}:
+                counts = {
+                    key: count
+                    for key, _, count in coordinator.get(reverse("home")).context[
+                        "stats"
+                    ]
+                }
+                self.assertEqual(counts[status], 1)
+            if status != "approved":
+                self.assertNotIn(
+                    a.title,
+                    [
+                        event["title"]
+                        for event in other.get(reverse("calendar")).context["events"]
+                    ],
+                )
+        calendar = other.get(reverse("calendar"))
+        event = next(
+            event for event in calendar.context["events"] if event["title"] == a.title
+        )
+        self.assertEqual(event["club__name"], self.computer.name)
+        self.assertNotIn(a.description, event.values())
+        self.assertNotIn(attachment.print_description, event.values())
 
     def test_online_form_and_required_sessions(self):
         self.login(self.a)
@@ -404,33 +463,18 @@ class WorkflowTests(TestCase):
         self.login(self.a)
         self.assertContains(self.client.get(f"/requests/{a.pk}/"), "سبب الرفض المسجل")
 
-    def test_sparse_draft_and_autosave_repeatability(self):
+    def test_simple_request_rejects_missing_required_fields(self):
         self.login(self.a)
-        payload = {
-            "title": "مسودة جزئية",
-            "participants": "0",
-            "autosave": "1",
-            "req-TOTAL_FORMS": "1",
-            "req-INITIAL_FORMS": "0",
-            "req-0-category": "",
-            "req-0-price": "0",
-        }
-        payload.update(
+        response = self.client.post(
+            "/new/event/",
             {
-                f"{key}-{suffix}": value
-                for key in ["program", "speakers", "partners", "extra_dates"]
-                for suffix, value in [("TOTAL_FORMS", "1"), ("INITIAL_FORMS", "0")]
-            }
+                "title": "طلب ناقص",
+                "needs-TOTAL_FORMS": 0,
+                "needs-INITIAL_FORMS": 0,
+            },
         )
-        response = self.client.post("/new/event/", payload)
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["saved"])
-        payload["title"] = "مسودة معدلة"
-        self.client.post(data["url"], payload)
-        self.assertEqual(
-            Activity.objects.filter(title="مسودة معدلة", club=self.computer).count(), 1
-        )
+        self.assertTrue(response.context["form"].errors.get("description"))
+        self.assertFalse(Activity.objects.filter(title="طلب ناقص").exists())
 
     def test_password_reset_uses_configured_mail_backend(self):
         from django.core import mail

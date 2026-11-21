@@ -1,0 +1,63 @@
+{% extends 'coordination/base.html' %}
+{% block content %}
+<h1>{% if a.kind == 'online' %}طلب ورشة إلكترونية{% else %}طلب فعالية وجاهية{% endif %}</h1>
+<form method="post">
+  {% csrf_token %}
+  {% if draft_token %}<input type="hidden" name="draft_token" value="{{ draft_token }}">{% endif %}
+  <div class="card request-fields">
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <div {% if field.name == 'title' or field.name == 'description' %}class="wide"{% endif %}>
+        {{ field.label_tag }}{{ field }}{{ field.errors }}
+      </div>
+      {% if field.name == 'date' %}
+        <div><label for="weekday">اليوم</label><output id="weekday" for="{{ field.id_for_label }}" aria-live="polite">يُحدد من التاريخ</output></div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  <section class="card">
+    <h2>الاحتياجات</h2>
+    {{ needs.management_form }}{{ needs.non_form_errors }}
+    <div id="needs">
+      {% for row in needs %}
+        {% include 'coordination/club_need.html' with row=row %}
+      {% endfor %}
+    </div>
+    <template id="new-need">{% include 'coordination/club_need.html' with row=needs.empty_form %}</template>
+    <button type="button" class="secondary" id="add-need">إضافة صنف</button>
+  </section>
+  <button>حفظ ومتابعة إلى المطبوعات والإرسال</button>
+</form>
+<script>
+  const date = document.getElementById('id_date');
+  const weekday = document.getElementById('weekday');
+  const showDay = () => {
+    weekday.value = date.value
+      ? new Date(date.value + 'T12:00:00').toLocaleDateString('ar-PS', {weekday: 'long'})
+      : 'يُحدد من التاريخ';
+  };
+  date.addEventListener('change', showDay);
+  showDay();
+  const rows = document.getElementById('needs');
+  const total = document.getElementById('id_needs-TOTAL_FORMS');
+  const add = document.getElementById('add-need');
+  add.addEventListener('click', () => {
+    if (+total.value >= 100) return;
+    const template = document.getElementById('new-need');
+    rows.insertAdjacentHTML('beforeend', template.innerHTML.replaceAll('__prefix__', total.value));
+    total.value = Number(total.value) + 1;
+    add.disabled = +total.value >= 100;
+    rows.lastElementChild.querySelector('input').focus();
+  });
+  rows.addEventListener('click', event => {
+    if (!event.target.matches('.remove-need')) return;
+    const row = event.target.closest('.needs-row');
+    row.querySelector('[name$="-DELETE"]').checked = true;
+    row.hidden = true;
+    add.focus();
+  });
+  for (const checkbox of rows.querySelectorAll('[name$="-DELETE"]:checked')) {
+    checkbox.closest('.needs-row').hidden = true;
+  }
+</script>
+{% endblock %}

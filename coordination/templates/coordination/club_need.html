@@ -1,0 +1,7 @@
+<div class="needs-row">
+  {{ row.non_field_errors }}
+  <div>{{ row.item.label_tag }}{{ row.item }}{{ row.item.errors }}</div>
+  <div>{{ row.quantity.label_tag }}{{ row.quantity }}{{ row.quantity.errors }}</div>
+  <div hidden>{{ row.DELETE }}</div>
+  <button type="button" class="secondary remove-need">إزالة الصنف</button>
+</div>

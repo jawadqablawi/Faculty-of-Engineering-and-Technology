@@ -1,2 +1,67 @@
-const {chromium}=require('playwright');const fs=require('fs');
-(async()=>{const b=await chromium.launch({executablePath:'/usr/bin/chromium',headless:true,args:['--no-sandbox']});const c=await b.newContext({viewport:{width:1440,height:1000}});await c.addCookies([{name:'sessionid',value:fs.readFileSync(process.env.ETCS_SMOKE_SESSION,'utf8'),domain:'127.0.0.1',path:'/'}]);const p=await c.newPage();const errors=[];p.on('pageerror',e=>errors.push(e.message));await p.goto(process.env.ETCS_SMOKE_BASE_URL+'/');await p.getByRole('heading',{name:/أهلاً/}).waitFor();await p.screenshot({path:process.env.ETCS_SMOKE_ARTIFACTS+'/desktop.png',fullPage:true});await p.goto(process.env.ETCS_SMOKE_BASE_URL+'/new/event/');await p.locator('[name=title]').fill('فعالية اختبار المتصفح');await p.locator('[name=description]').fill('اختبار عملي للنموذج باللغة العربية');await p.locator('[name=objectives]').fill('التحقق من الحفظ');await p.locator('[name=organizer]').fill('فريق الاختبار');await p.locator('[name=contact]').fill('synthetic@example.test');await p.locator('[name=participants]').fill('25');await p.locator('[data-step="1"]').click();await p.locator('[name=date]').fill(new Date(Date.now()+30*86400000).toISOString().slice(0,10));await p.locator('[name=start]').fill('10:00');await p.locator('[name=end]').fill('12:00');await p.locator('[name=venue]').fill('قاعة الاختبار');await p.locator('[data-step="2"]').click();await p.locator('[name=req-0-category]').selectOption('حواسيب');await p.locator('[name=req-0-item]').fill('حاسوب');await p.locator('[name=req-0-quantity]').fill('3');await p.locator('[name=req-0-price]').fill('20');if(await p.locator('#budget').innerText()!=='60.00')throw Error('Budget calculation failed');await p.locator('[data-step="3"]').click();await p.getByRole('button',{name:'حفظ كمسودة',exact:true}).click();await p.waitForLoadState('networkidle');if(p.url().includes('/new/')){console.log(await p.locator('.errorlist').allTextContents());await p.screenshot({path:process.env.ETCS_SMOKE_ARTIFACTS+'/form-error.png',fullPage:true});throw Error('Form save failed')}await p.waitForURL(/\/requests\/[a-f0-9-]+\/$/);await p.getByRole('button',{name:'إرسال الطلب للمراجعة'}).click();await p.getByText('بانتظار المراجعة',{exact:true}).first().waitFor();await p.setViewportSize({width:390,height:844});await p.goto(process.env.ETCS_SMOKE_BASE_URL+'/');await p.screenshot({path:process.env.ETCS_SMOKE_ARTIFACTS+'/mobile.png',fullPage:true});const overflow=await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth);if(overflow)throw Error('Mobile horizontal overflow');await p.goto(process.env.ETCS_SMOKE_BASE_URL+'/calendar/');await p.locator('#calendar-grid > div').first().waitFor();await p.locator('#mode').selectOption('week');if(await p.locator('#calendar-grid > div').count()!==7)throw Error('Week view failed');await p.locator('#mode').selectOption('day');if(await p.locator('#calendar-grid > div').count()!==1)throw Error('Day view failed');if(errors.length)throw Error(errors.join('; '));console.log('PASS: desktop RTL dashboard, four-step form, live budget, persisted draft, submission, mobile layout, calendar week/day, no JS errors');await b.close()})().catch(e=>{console.error(e);process.exit(1)});
+const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+
+async function smoke() {
+  const browser = await chromium.launch({
+    executablePath: '/usr/bin/chromium',
+    headless: true,
+    args: ['--no-sandbox'],
+  });
+  try {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const base = process.env.ETCS_SMOKE_BASE_URL;
+    await context.addCookies([{
+      name: 'sessionid',
+      value: fs.readFileSync(process.env.ETCS_SMOKE_SESSION, 'utf8'),
+      url: base,
+    }]);
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(base + '/');
+    await page.getByRole('heading', { name: 'نادي هندسة الحاسوب' }).waitFor();
+    assert.equal(await page.locator('.workspace-nav a').count(), 5);
+    await page.screenshot({ path: process.env.ETCS_SMOKE_ARTIFACTS + '/desktop.png' });
+
+    await page.setViewportSize({ width: 360, height: 800 });
+    await page.getByRole('link', { name: 'فعالية وجاهية جديدة' }).click();
+    await page.locator('#id_title').fill('المهارات الحياتية لسوق العمل');
+    await page.locator('#id_description').fill('وصف النشاط الذي يرسله النادي');
+    await page.locator('#id_date').fill(new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10));
+    assert.notEqual(await page.locator('#weekday').innerText(), 'يُحدد من التاريخ');
+    await page.locator('#id_venue').fill('قاعة الكلية');
+    await page.locator('#id_needs-0-item').fill('عصير');
+    await page.locator('#id_needs-0-quantity').fill('100');
+    await page.getByRole('button', { name: 'إضافة صنف' }).click();
+    await page.locator('#id_needs-1-item').fill('كاسات كرتون');
+    await page.locator('#id_needs-1-quantity').fill('60');
+    assert.equal(await page.locator('[name$="price"]').count(), 0);
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await page.screenshot({ path: process.env.ETCS_SMOKE_ARTIFACTS + '/mobile.png', fullPage: true });
+    await page.getByRole('button', { name: 'حفظ ومتابعة إلى المطبوعات والإرسال' }).click();
+    await page.waitForURL(/\/requests\/[a-f0-9-]+\/$/);
+
+    await page.locator('#print-file').setInputFiles({
+      name: 'poster.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF-1.4\nSynthetic printable document'),
+    });
+    await page.locator('#print-description').fill('اطبع 60 نسخة');
+    await page.getByRole('button', { name: 'إضافة الملف' }).click();
+    await page.getByText('اطبع 60 نسخة').waitFor();
+    await page.getByRole('button', { name: 'إرسال الطلب للمراجعة' }).click();
+    await page.getByText('بانتظار المراجعة', { exact: true }).waitFor();
+    await page.getByRole('link', { name: 'تقويم الأنشطة' }).click();
+    assert.equal(await page.getByText('المهارات الحياتية لسوق العمل').count(), 0);
+    assert.deepEqual(errors, []);
+    console.log('PASS: desktop and mobile RTL, automatic weekday, two needs without prices, printing attachment and description, submission, pending activity hidden from calendar.');
+  } finally {
+    await browser.close();
+  }
+}
+
+smoke().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

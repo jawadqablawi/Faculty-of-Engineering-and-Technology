@@ -225,71 +225,61 @@ class CompletionTests(TestCase):
         response = self.client.get("/healthz/")
         self.assertEqual(response.json(), {"status": "ok"})
 
-    def test_structured_online_sessions_are_relational(self):
-        self.login(self.a)
-        tomorrow = timezone.localdate() + timedelta(days=5)
-        data = {
-            "title": "ورشة اختبار",
-            "participants": "10",
-            "platform": "Zoom",
-            "detail-presenter": "مقدم اختباري",
-            "session-TOTAL_FORMS": "1",
-            "session-INITIAL_FORMS": "0",
-            "session-0-title": "جلسة أولى",
-            "session-0-date": str(tomorrow),
-            "session-0-start": "10:00",
-            "session-0-end": "12:00",
-        }
-        response = self.client.post("/new/online/", data)
-        self.assertEqual(response.status_code, 302)
-        session = WorkshopSession.objects.get()
-        self.assertEqual(session.activity.club, self.computer)
-        self.assertEqual(session.title, "جلسة أولى")
+    def test_editing_legacy_activities_preserves_existing_dates_and_sessions(self):
+        from .models import EventDate
 
-    def test_extra_days_are_validated_and_stored(self):
         self.login(self.a)
-        data = {
-            "title": "فعالية متعددة الأيام",
-            "participants": "0",
-            "req-TOTAL_FORMS": "0",
-            "req-INITIAL_FORMS": "0",
-        }
-        for prefix in ["program", "speakers", "partners"]:
-            data.update({prefix + "-TOTAL_FORMS": "0", prefix + "-INITIAL_FORMS": "0"})
-        data.update(
-            {
-                "extra_dates-TOTAL_FORMS": "1",
-                "extra_dates-INITIAL_FORMS": "0",
-                "extra_dates-0-date": "2027-03-15",
-                "extra_dates-0-start": "10:00",
-                "extra_dates-0-end": "12:00",
-                "extra_dates-0-venue": "قاعة إضافية",
-            }
-        )
-        response = self.client.post("/new/event/", data)
-        self.assertEqual(response.status_code, 302)
-        row = Activity.objects.get(title=data["title"])
-        self.assertEqual(row.event_dates.count(), 1)
+        day = timezone.localdate() + timedelta(days=5)
+        for kind, child in (("event", EventDate), ("online", WorkshopSession)):
+            activity = Activity.objects.create(
+                kind=kind,
+                title="طلب سابق",
+                club=self.computer,
+                creator=self.a,
+                details={"presenter": "مقدم سابق"},
+            )
+            values = {"date": day, "start": "10:00", "end": "12:00"}
+            values.update(
+                {"venue": "قاعة"} if kind == "event" else {"title": "جلسة سابقة"}
+            )
+            date_row = child.objects.create(activity=activity, **values)
+            response = self.client.post(
+                f"/requests/{activity.pk}/edit/",
+                {
+                    "title": "طلب معدل",
+                    "description": "وصف النشاط",
+                    "venue": "قاعة",
+                    "date": str(day),
+                    "needs-TOTAL_FORMS": 0,
+                    "needs-INITIAL_FORMS": 0,
+                },
+            )
+            self.assertEqual(response.status_code, 302)
+            activity.refresh_from_db()
+            self.assertEqual(activity.details["presenter"], "مقدم سابق")
+            self.assertTrue(
+                child.objects.filter(pk=date_row.pk, activity=activity).exists()
+            )
 
-    def test_signed_autosave_is_idempotent_and_bound_to_user(self):
+    def test_signed_request_is_idempotent_and_bound_to_user(self):
         self.login(self.a)
-        response = self.client.get("/new/event/")
-        token = response.context["draft_token"]
+        response = self.client.get("/new/online/")
         data = {
             "title": "مسودة واحدة",
-            "participants": "0",
-            "draft_token": token,
-            "autosave": "1",
-            "req-TOTAL_FORMS": "0",
-            "req-INITIAL_FORMS": "0",
+            "description": "وصف النشاط",
+            "venue": "منصة افتراضية",
+            "date": str(timezone.localdate() + timedelta(days=7)),
+            "draft_token": response.context["draft_token"],
+            "needs-TOTAL_FORMS": "0",
+            "needs-INITIAL_FORMS": "0",
         }
-        for prefix in ["program", "speakers", "partners", "extra_dates"]:
-            data.update({prefix + "-TOTAL_FORMS": "0", prefix + "-INITIAL_FORMS": "0"})
-        self.assertTrue(self.client.post("/new/event/", data).json()["saved"])
-        self.assertTrue(self.client.post("/new/event/", data).json()["saved"])
-        self.assertEqual(Activity.objects.filter(title="مسودة واحدة").count(), 1)
+        first = self.client.post("/new/online/", data)
+        second = self.client.post("/new/online/", data)
+        self.assertEqual(first.status_code, 302)
+        self.assertEqual(second.url, first.url)
+        self.assertEqual(Activity.objects.get(title="مسودة واحدة").kind, "online")
         self.login(self.b)
-        self.assertEqual(self.client.post("/new/event/", data).status_code, 403)
+        self.assertEqual(self.client.post("/new/online/", data).status_code, 403)
 
     def test_club_meetings_remain_private(self):
         self.login(self.a)

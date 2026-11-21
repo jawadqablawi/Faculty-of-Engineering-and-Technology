@@ -47,21 +47,21 @@ def checks():
     client = Client(HTTP_X_FORWARDED_PROTO="https")
     client.force_login(admin)
     email = "vercel-club-1@example.test"
-    temporary = "Synthetic-temporary-840!"
-    permanent = "Synthetic-permanent-540!"
-    assert client.post(
-        "/manage/accounts/new-club/",
-        {"email": email, "club": clubs[1].pk, "temporary_password": temporary},
-    ).url == "/manage/accounts/"
+    password = "Synthetic-assigned-840!"
+    assert (
+        client.post(
+            "/manage/accounts/new-club/",
+            {
+                "first_name": "مسؤول النادي",
+                "email": email,
+                "club": clubs[1].pk,
+                "temporary_password": password,
+            },
+        ).url
+        == "/manage/accounts/"
+    )
     client.logout()
-    assert client.post(
-        "/login/", {"username": email, "password": temporary}
-    ).url == "/first-password-change/"
-    assert client.get("/requests/").url == "/first-password-change/"
-    assert client.post(
-        "/first-password-change/",
-        {"new_password1": permanent, "new_password2": permanent},
-    ).url == "/"
+    assert client.post("/login/", {"username": email, "password": password}).url == "/"
     assert client.get("/requests/").status_code == 200
     users = [existing, User.objects.get(email=email)]
     client.force_login(users[0])
@@ -72,35 +72,30 @@ def checks():
     data = {
         "title": "Vercel persistent request",
         "description": "وصف خاص لا يظهر للنادي الآخر",
-        "objectives": "الاختبار",
-        "organizer": "منظم",
-        "contact": "synthetic@example.test",
-        "participants": "12",
         "date": str(timezone.localdate() + timedelta(days=5)),
-        "start": "10:00",
-        "end": "12:00",
         "venue": "قاعة مشتركة",
-        "draft_token": page.context_data["draft_token"]
-        if hasattr(page, "context_data")
-        else "",
+        "needs-TOTAL_FORMS": "1",
+        "needs-INITIAL_FORMS": "0",
+        "needs-0-item": "عصير",
+        "needs-0-quantity": "100",
     }
-    for prefix in ["req", "program", "speakers", "partners", "extra_dates"]:
-        data.update({prefix + "-TOTAL_FORMS": "0", prefix + "-INITIAL_FORMS": "0"})
     response = client.post("/new/event/", data)
     assert response.status_code == 302
     activity_id = response.url.strip("/").split("/")[1]
     client.post(
         f"/requests/{activity_id}/upload/",
         {
+            "description": "Poster for printing",
             "file": SimpleUploadedFile(
                 "persistent.pdf", b"%PDF-1.4\nStored safely in Postgres"
-            )
+            ),
         },
     )
     with transaction.atomic():
         with connection.cursor() as c:
             c.execute("SELECT set_config('etcs.user_id',%s,true)", [str(users[0].pk)])
         attachment = Attachment.objects.get(activity_id=activity_id)
+        assert attachment.print_description == "Poster for printing"
         assert bytes(
             StoredDocument.objects.get(name=attachment.file.name).data
         ).startswith(b"%PDF")
@@ -125,7 +120,7 @@ def checks():
             "status": "مسودة",
         },
     )
-    for action in ["forward", "council_ok", "university_ok"]:
+    for action in ["forward", "council_ok", "student_ok", "university_ok"]:
         client.post(
             f"/requests/{activity_id}/action/",
             {"action": action, "note": "Synthetic recorded decision"},
@@ -156,7 +151,7 @@ def checks():
         == 200
     )
     print(
-        "PASS: Vercel mode with a non-superuser database owner; direct club account and mandatory password change; private database files; cross-club denial; full approval; Arabic PDFs; safe cross-club calendar; authenticated scheduled job"
+        "PASS: Vercel mode with a non-superuser database owner; direct club account and immediate sign-in; private database files; cross-club denial; full approval; Arabic PDFs; safe cross-club calendar; authenticated scheduled job"
     )
 
 

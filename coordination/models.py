@@ -49,7 +49,8 @@ class Activity(models.Model):
         ("preliminary", "موافقة أولية"),
         ("council", "مرفوع للمجلس"),
         ("approvals", "بانتظار الموافقات"),
-        ("approved", "معتمد"),
+        ("student_approved", "موافق عليه من شؤون الطلبة"),
+        ("approved", "معتمد رسميًا"),
         ("rejected", "مرفوض"),
         ("completed", "مكتمل"),
         ("cancelled", "ملغي"),
@@ -149,6 +150,9 @@ class Attachment(models.Model):
     version = models.PositiveIntegerField(default=1)
     checksum = models.CharField(max_length=64, blank=True)
     purpose = models.CharField(max_length=100, blank=True)
+    print_description = models.CharField(
+        max_length=500, blank=True, default="", db_default=""
+    )
     deleted = models.BooleanField(default=False)
     created = models.DateTimeField(auto_now_add=True)
 

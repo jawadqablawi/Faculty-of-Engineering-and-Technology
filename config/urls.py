@@ -39,9 +39,6 @@ urlpatterns = [
     ),
     path("", v.home, name="home"),
     path("login/", v.SecureLogin.as_view(), name="login"),
-    path(
-        "first-password-change/", v.first_password_change, name="first_password_change"
-    ),
     path("logout/", auth.LogoutView.as_view(), name="logout"),
     path(
         "password-reset/",

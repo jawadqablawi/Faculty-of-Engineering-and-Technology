@@ -74,6 +74,7 @@ def transition(user, activity_id, action, note=""):
     a = Activity.objects.select_for_update().get(pk=activity_id)
     p = profile(user)
     previous = a.status
+    simple = a.details.get("simple_request")
     if p.role == "club":
         if p.club_id != a.club_id:
             raise PermissionDenied
@@ -95,58 +96,90 @@ def transition(user, activity_id, action, note=""):
             "complete": ({"approved"}, "completed"),
             "cancel": ({"approved", "council", "approvals"}, "cancelled"),
         }
+        if simple:
+            rules.update(
+                {
+                    "forward": ({"review", "preliminary"}, "council"),
+                    "student_ok": ({"approvals"}, "student_approved"),
+                    "university_ok": ({"student_approved"}, "approved"),
+                    "reject": (
+                        {
+                            "review",
+                            "preliminary",
+                            "council",
+                            "approvals",
+                            "student_approved",
+                        },
+                        "rejected",
+                    ),
+                }
+            )
     if action not in rules or previous not in rules[action][0]:
         raise ValidationError("الإجراء غير متاح في حالة الطلب الحالية")
     if (
         action
-        in {"changes", "reject", "forward", "council_ok", "university_ok", "cancel"}
+        in {
+            "changes",
+            "reject",
+            "forward",
+            "council_ok",
+            "student_ok",
+            "university_ok",
+            "cancel",
+        }
         and not note.strip()
     ):
         raise ValidationError("يرجى تسجيل السبب أو مرجع دليل القرار")
     if action == "submit":
-        if not all(
-            [
-                a.title,
-                a.description,
-                a.objectives,
-                a.organizer,
-                a.contact,
-                a.date,
-                a.start,
-                a.end,
-                a.participants,
-            ]
-        ):
-            raise ValidationError(
-                "أكمل الوصف والأهداف والمسؤول والتواصل والعدد والتاريخ والأوقات أولاً"
-            )
-        if a.date < timezone.localdate() or a.end <= a.start:
-            raise ValidationError("التاريخ أو الوقت غير صالح")
-        if a.kind == "event" and not a.venue:
-            raise ValidationError("أدخل مكان الفعالية")
-        if a.kind == "online" and (
-            not a.platform
-            or not a.details.get("presenter")
-            or not a.details.get("sessions")
-        ):
-            raise ValidationError("أدخل المنصة والمقدم وجلسة واحدة على الأقل")
-        setting = Setting.objects.filter(key="idea_required").first()
-        if setting and setting.value is True and a.kind == "event":
-            from .models import Idea
+        if simple:
+            if not all([a.title, a.description, a.date, a.venue]):
+                raise ValidationError("أكمل العنوان والوصف والتاريخ والمكان أولاً")
+            if a.date < timezone.localdate():
+                raise ValidationError("اختر تاريخًا من اليوم فما بعد")
+        else:
+            if not all(
+                [
+                    a.title,
+                    a.description,
+                    a.objectives,
+                    a.organizer,
+                    a.contact,
+                    a.date,
+                    a.start,
+                    a.end,
+                    a.participants,
+                ]
+            ):
+                raise ValidationError(
+                    "أكمل الوصف والأهداف والمسؤول والتواصل والعدد والتاريخ والأوقات أولاً"
+                )
+            if a.date < timezone.localdate() or a.end <= a.start:
+                raise ValidationError("التاريخ أو الوقت غير صالح")
+            if a.kind == "event" and not a.venue:
+                raise ValidationError("أدخل مكان الفعالية")
+            if a.kind == "online" and (
+                not a.platform
+                or not a.details.get("presenter")
+                or not a.details.get("sessions")
+            ):
+                raise ValidationError("أدخل المنصة والمقدم وجلسة واحدة على الأقل")
+            setting = Setting.objects.filter(key="idea_required").first()
+            if setting and setting.value is True and a.kind == "event":
+                from .models import Idea
 
-            ref = a.details.get("idea_reference")
-            if ref and not str(ref).isdigit():
-                raise ValidationError("مرجع الفكرة يجب أن يكون رقماً صحيحاً")
-            if not Idea.objects.filter(
-                pk=ref or None,
-                club=a.club,
-                outcome="جاهز للتقديم الرسمي",
-            ).exists():
-                raise ValidationError("يلزم اعتماد الفكرة للتقديم الرسمي")
+                ref = a.details.get("idea_reference")
+                if ref and not str(ref).isdigit():
+                    raise ValidationError("مرجع الفكرة يجب أن يكون رقماً صحيحاً")
+                if not Idea.objects.filter(
+                    pk=ref or None,
+                    club=a.club,
+                    outcome="جاهز للتقديم الرسمي",
+                ).exists():
+                    raise ValidationError("يلزم اعتماد الفكرة للتقديم الرسمي")
         if not a.number:
             a.number = next_number("EVT" if a.kind == "event" else "ONL")
         a.submitted = timezone.now()
-    if action == "submit":
+    if action == "submit" and not simple:
         from datetime import date, time
 
         for row in a.details.get("extra_dates", []) + a.details.get("sessions", []):
@@ -163,13 +196,25 @@ def transition(user, activity_id, action, note=""):
             ApprovalRequirement.objects.get_or_create(
                 activity=a, office=office, defaults={"required": True}
             )
-    if action == "forward" and not a.letters.exists():
+    if action == "forward" and not simple and not a.letters.exists():
         raise ValidationError("أعد الكتاب الرسمي أولاً")
     if action == "council_ok":
         a.council_approved = True
         ApprovalRequirement.objects.update_or_create(
             activity=a,
             office="مجلس الطلبة",
+            defaults={
+                "required": True,
+                "decision": "approved",
+                "evidence": note,
+                "actor": user,
+                "decided": timezone.now(),
+            },
+        )
+    if action == "student_ok":
+        ApprovalRequirement.objects.update_or_create(
+            activity=a,
+            office="شؤون الطلبة",
             defaults={
                 "required": True,
                 "decision": "approved",

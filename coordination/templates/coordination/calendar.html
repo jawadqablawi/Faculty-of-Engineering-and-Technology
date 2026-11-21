@@ -1,1 +1,114 @@
-{% extends 'coordination/base.html' %}{% block content %}<h1>تقويم أنشطة الكلية</h1><p class="muted">تظهر المعلومات العامة للأنشطة المعتمدة فقط. الطلبات المبدئية منفصلة.</p><a class="button secondary" href="{% url 'calendar_export' %}">تصدير التقويم</a><div class="card"><div class="toolbar"><button type="button" id="back" class="secondary">→</button><h2 id="month-label"></h2><button type="button" id="forward" class="secondary">←</button><select id="mode"><option value="month">شهر</option><option value="week">أسبوع</option><option value="day">يوم</option></select><select id="club-filter"><option value="">كل النوادي</option></select><select id="kind-filter"><option value="">كل الأنشطة</option><option value="event">وجاهي</option><option value="online">إلكتروني</option></select></div><div id="calendar-grid" style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-top:20px"></div></div><div class="card"><h2>طلبات قيد التنسيق · غير مؤكدة</h2>{% for e in pending %}<p>{{ e.date }} · {{ e.title }}</p>{% empty %}<p class="muted">لا توجد مواعيد مبدئية</p>{% endfor %}</div>{{ events|json_script:'events' }}<script>(()=>{const events=JSON.parse(document.getElementById('events').textContent),grid=document.getElementById('calendar-grid'),club=document.getElementById('club-filter'),kind=document.getElementById('kind-filter'),mode=document.getElementById('mode');for(const name of new Set(events.map(e=>e.club__name))){const o=new Option(name,name);club.add(o)}let date=new Date();function render(){grid.replaceChildren();const m=mode.value;let start=new Date(date.getFullYear(),date.getMonth(),m==='month'?1:date.getDate());if(m!=='day')start.setDate(start.getDate()-start.getDay());let count=m==='month'?42:m==='week'?7:1;grid.style.gridTemplateColumns=m==='day'?'1fr':'repeat(7,minmax(0,1fr))';document.getElementById('month-label').textContent=date.toLocaleDateString('ar-PS',{year:'numeric',month:'long',...(m==='month'?{}:{day:'numeric'})});for(let i=0;i<count;i++){const cell=document.createElement('div');cell.style.cssText='border:1px solid #e1e7ef;border-radius:6px;min-height:100px;padding:6px;font-size:12px;overflow-wrap:anywhere';const label=document.createElement('small');label.textContent=start.getDate();cell.append(label);const iso=[start.getFullYear(),String(start.getMonth()+1).padStart(2,'0'),String(start.getDate()).padStart(2,'0')].join('-');for(const e of events.filter(e=>e.date===iso&&(!club.value||club.value===e.club__name)&&(!kind.value||kind.value===e.kind))){const p=document.createElement('p');p.textContent=e.title+' · '+(e.start||'');p.style.cssText='background:#eaf1fb;color:#165dba;border-radius:5px;padding:4px';cell.append(p)}grid.append(cell);start.setDate(start.getDate()+1)}}function move(n){if(mode.value==='month')date.setMonth(date.getMonth()+n);else date.setDate(date.getDate()+n*(mode.value==='week'?7:1));render()}document.getElementById('back').onclick=()=>move(-1);document.getElementById('forward').onclick=()=>move(1);mode.onchange=club.onchange=kind.onchange=render;render()})();</script>{% endblock %}
+{% extends 'coordination/base.html' %}
+{% block content %}
+<div class="section-heading">
+  <h1>تقويم أنشطة الكلية</h1>
+  <a class="button secondary" href="{% url 'calendar_export' %}">تصدير التقويم</a>
+</div>
+<p class="muted">الأنشطة المعتمدة رسميًا</p>
+<div class="card">
+  <div class="toolbar">
+    <button type="button" id="back" class="secondary" aria-label="الفترة السابقة">→</button>
+    <h2 id="month-label" aria-live="polite"></h2>
+    <button type="button" id="forward" class="secondary" aria-label="الفترة التالية">←</button>
+    <select id="mode" aria-label="الفترة المعروضة">
+      <option value="month">شهر</option><option value="week">أسبوع</option><option value="day">يوم</option>
+    </select>
+    <select id="club-filter" aria-label="النادي"><option value="">كل النوادي</option></select>
+    <select id="kind-filter" aria-label="نوع النشاط">
+      <option value="">كل الأنشطة</option><option value="event">وجاهي</option><option value="online">إلكتروني</option>
+    </select>
+  </div>
+  <div id="calendar-grid" class="calendar-grid"></div>
+  <ul id="calendar-agenda" class="calendar-agenda file-list"></ul>
+</div>
+<style>
+.calendar-grid{display:grid;gap:4px;margin-top:20px}
+.calendar-cell{border:1px solid var(--line);border-radius:6px;min-height:100px;padding:6px;font-size:13px;overflow-wrap:anywhere}
+.calendar-cell p{background:#eaf1fb;color:var(--blue);border-radius:5px;padding:4px}
+.calendar-agenda{display:none}
+@media(max-width:600px){.calendar-grid{display:none}.calendar-agenda{display:block}}
+</style>
+{{ events|json_script:'events' }}
+<script>
+  (() => {
+    const events = JSON.parse(document.getElementById('events').textContent);
+    const grid = document.getElementById('calendar-grid');
+    const agenda = document.getElementById('calendar-agenda');
+    const club = document.getElementById('club-filter');
+    const kind = document.getElementById('kind-filter');
+    const mode = document.getElementById('mode');
+    const date = new Date();
+    for (const name of [...new Set(events.map(event => event.club__name))].sort()) {
+      club.add(new Option(name, name));
+    }
+    const toDateKey = day => [
+      day.getFullYear(),
+      String(day.getMonth() + 1).padStart(2, '0'),
+      String(day.getDate()).padStart(2, '0'),
+    ].join('-');
+    const formatDate = day => day.toLocaleDateString('ar-PS', {
+      weekday: 'long', day: 'numeric', month: 'long',
+    });
+
+    function render() {
+      grid.replaceChildren();
+      agenda.replaceChildren();
+      const period = mode.value;
+      const day = new Date(date.getFullYear(), date.getMonth(), period === 'month' ? 1 : date.getDate());
+      if (period !== 'day') day.setDate(day.getDate() - day.getDay());
+      const count = {month: 42, week: 7, day: 1}[period];
+      grid.style.gridTemplateColumns = period === 'day' ? '1fr' : 'repeat(7,minmax(0,1fr))';
+      document.getElementById('month-label').textContent = date.toLocaleDateString('ar-PS', {
+        year: 'numeric', month: 'long', ...(period === 'month' ? {} : {day: 'numeric'}),
+      });
+      for (let index = 0; index < count; index++) {
+        const cell = document.createElement('div');
+        cell.className = 'calendar-cell';
+        const label = document.createElement('small');
+        label.textContent = day.getDate();
+        cell.append(label);
+        for (const event of events.filter(event =>
+          event.date === toDateKey(day) &&
+          (!club.value || club.value === event.club__name) &&
+          (!kind.value || kind.value === event.kind)
+        )) {
+          const summary = [event.title, event.club__name, event.start?.slice(0, 5)].filter(Boolean).join(' · ');
+          const card = document.createElement('p');
+          card.textContent = summary;
+          cell.append(card);
+          if (period !== 'month' || day.getMonth() === date.getMonth()) {
+            const item = document.createElement('li');
+            const heading = document.createElement('strong');
+            heading.textContent = formatDate(day);
+            const details = document.createElement('p');
+            details.textContent = summary;
+            item.append(heading, details);
+            agenda.append(item);
+          }
+        }
+        grid.append(cell);
+        day.setDate(day.getDate() + 1);
+      }
+      if (!agenda.childElementCount) {
+        const empty = document.createElement('li');
+        empty.textContent = 'لا توجد أنشطة معتمدة في الفترة المحددة.';
+        agenda.append(empty);
+      }
+    }
+
+    function move(amount) {
+      if (mode.value === 'month') {
+        date.setDate(1);
+        date.setMonth(date.getMonth() + amount);
+      } else {
+        date.setDate(date.getDate() + amount * (mode.value === 'week' ? 7 : 1));
+      }
+      render();
+    }
+    document.getElementById('back').onclick = () => move(-1);
+    document.getElementById('forward').onclick = () => move(1);
+    mode.onchange = club.onchange = kind.onchange = render;
+    render();
+  })();
+</script>
+{% endblock %}

@@ -1,6 +1,4 @@
 from django import forms
-from django.contrib.auth.forms import SetPasswordForm
-from django.contrib.auth.hashers import check_password
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from .models import (
@@ -19,6 +17,7 @@ from .models import (
 
 
 class ClubAccountForm(forms.Form):
+    first_name = forms.CharField(label="اسم مسؤول النادي", max_length=150)
     email = forms.EmailField(
         label="البريد الإلكتروني",
         max_length=User._meta.get_field("username").max_length,
@@ -30,7 +29,7 @@ class ClubAccountForm(forms.Form):
         empty_label="اختر النادي",
     )
     temporary_password = forms.CharField(
-        label="كلمة المرور المؤقتة",
+        label="كلمة المرور",
         strip=False,
         max_length=4096,
         widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
@@ -38,9 +37,10 @@ class ClubAccountForm(forms.Form):
 
     def clean_email(self):
         email = self.cleaned_data["email"].lower()
-        if User.objects.filter(email__iexact=email).exists() or User.objects.filter(
-            username__iexact=email
-        ).exists():
+        if (
+            User.objects.filter(email__iexact=email).exists()
+            or User.objects.filter(username__iexact=email).exists()
+        ):
             raise forms.ValidationError("يوجد حساب لهذا البريد بالفعل.")
         return email
 
@@ -56,13 +56,43 @@ class ClubAccountForm(forms.Form):
         return cleaned_data
 
 
-class FirstPasswordForm(SetPasswordForm):
-    def clean(self):
-        cleaned_data = super().clean()
-        password = cleaned_data.get("new_password1")
-        if password and check_password(password, self.user.password):
-            self.add_error("new_password1", "اختر كلمة مرور مختلفة عن كلمة المرور المؤقتة.")
-        return cleaned_data
+class ClubRequestForm(forms.ModelForm):
+    class Meta:
+        model = Activity
+        fields = ["title", "description", "date", "venue"]
+        labels = {
+            "title": "العنوان",
+            "description": "الوصف",
+            "date": "التاريخ",
+            "venue": "المكان",
+        }
+        widgets = {
+            "date": forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+            "description": forms.Textarea(attrs={"rows": 4}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for name in ("description", "date", "venue"):
+            self.fields[name].required = True
+
+    def clean_date(self):
+        from django.utils import timezone
+
+        day = self.cleaned_data["date"]
+        if day < timezone.localdate():
+            raise forms.ValidationError("اختر تاريخًا من اليوم فما بعد.")
+        return day
+
+
+class ClubNeedForm(forms.Form):
+    item = forms.CharField(label="الصنف", max_length=180)
+    quantity = forms.IntegerField(label="العدد", min_value=1, max_value=1_000_000)
+
+
+ClubNeeds = forms.formset_factory(
+    ClubNeedForm, extra=1, can_delete=True, max_num=100, validate_max=True
+)
 
 
 class ActivityForm(forms.ModelForm):
