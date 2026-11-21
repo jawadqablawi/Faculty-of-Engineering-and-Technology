@@ -134,6 +134,30 @@ class WorkflowTests(TestCase):
                 404,
             )
 
+    def test_remember_device_renews_and_logout_clears_session(self):
+        from django.conf import settings
+
+        credentials = {"username": self.a.email, "password": "Synthetic-test-pass-837!"}
+        plain = self.client.post(reverse("login"), credentials)
+        cookie = settings.SESSION_COOKIE_NAME
+        self.assertEqual(
+            int(plain.cookies[cookie]["max-age"]), settings.SESSION_COOKIE_AGE
+        )
+        self.client.post(reverse("logout"))
+        remembered = self.client.post(
+            reverse("login"), {**credentials, "remember_device": "on"}
+        )
+        self.assertGreater(int(remembered.cookies[cookie]["max-age"]), 360 * 86400)
+
+        session = self.client.session
+        session.set_expiry(timezone.now() + timedelta(days=320))
+        session.save()
+        renewed = self.client.get(reverse("home"))
+        self.assertGreater(int(renewed.cookies[cookie]["max-age"]), 360 * 86400)
+        self.assertNotIn(cookie, self.client.get(reverse("home")).cookies)
+        self.client.post(reverse("logout"))
+        self.assertEqual(self.client.get(reverse("home")).status_code, 302)
+
     def test_direct_club_account_rejects_inactive_club(self):
         self.civil.active = False
         self.civil.save(update_fields=["active"])

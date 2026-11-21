@@ -66,6 +66,7 @@ from .models import (
     Setting,
     Task,
 )
+from .middleware import set_remembered_session
 from .security import consume_limit
 from .services import audit, transition
 from .table_views import REQUEST_SORT, page_context
@@ -96,6 +97,10 @@ class EmailAuthenticationForm(AuthenticationForm):
         widget=forms.EmailInput(attrs={"autocomplete": "username", "dir": "ltr"}),
     )
 
+    remember_device = forms.BooleanField(
+        label="خليك مسجّل الدخول على هذا الجهاز", required=False
+    )
+
     def clean_username(self):
         return self.cleaned_data["username"].strip().lower()
 
@@ -118,7 +123,13 @@ class SecureLogin(LoginView):
         except PermissionDenied:
             form.add_error(None, "الحساب غير مفعل أو لم يتم التحقق منه")
             return self.form_invalid(form)
-        return super().form_valid(form)
+        response = super().form_valid(form)
+        if form.cleaned_data["remember_device"]:
+            set_remembered_session(self.request.session)
+        else:
+            self.request.session.pop("remember_device", None)
+            self.request.session.set_expiry(None)
+        return response
 
 
 def context(request):

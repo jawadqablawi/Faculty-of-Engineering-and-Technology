@@ -7,6 +7,9 @@
   {% endif %}
   {% for field in form %}
     <div class="field">
+      {% if field.field.widget.input_type == 'checkbox' %}
+        <label class="toolbar">{{ field }} {{ field.label }}</label>
+      {% else %}
       {{ field.label_tag }}
       <div class="credential-input">
         {{ field }}
@@ -14,6 +17,7 @@
           <button type="button" class="secondary" data-password-toggle aria-controls="{{ field.id_for_label }}" aria-label="إظهار {{ field.label }}" aria-pressed="false" hidden><span>إظهار</span></button>
         {% endif %}
       </div>
+      {% endif %}
       {% if field.help_text %}<div id="{{ field.auto_id }}_helptext" class="muted">{{ field.help_text|safe }}</div>{% endif %}
       {{ field.errors }}
     </div>
