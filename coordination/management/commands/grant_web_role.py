@@ -39,7 +39,7 @@ class Command(BaseCommand):
             )
             c.execute(f"GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}")
             c.execute(
-                f"REVOKE UPDATE,DELETE ON public.coordination_audit,public.coordination_history,public.coordination_letterhistory FROM {role}"
+                f"REVOKE UPDATE ON public.coordination_audit,public.coordination_history,public.coordination_letterhistory FROM {role}"
             )
             c.execute(f"REVOKE CREATE ON SCHEMA public FROM {role}")
         self.stdout.write(

@@ -14,12 +14,12 @@
   </form>
   <div class="card" data-grid-results>
     <div class="table-wrap"><table aria-label="سجل الإجراءات">
-      {% include 'coordination/grid_head.html' %}
+      {% include 'coordination/grid_head.html' with has_actions=True %}
       <tbody>
         {% for entry in page %}
-        <tr><td>{{ entry.created }}</td><td>{{ entry.actor.email|default:'النظام' }}</td><td>{{ entry.action|action_label }}</td><td>{{ entry.record }}</td><td>{{ entry.note }}</td></tr>
+        <tr><td>{{ entry.created }}</td><td>{{ entry.actor.email|default:'النظام' }}</td><td>{{ entry.action|action_label }}</td><td>{{ entry.record }}</td><td>{{ entry.note }}</td><td>{% if entry.action != 'delete_audit_entry' and entry.action != 'delete_request' %}<form method="post" action="{% url 'delete_audit_entry' entry.pk %}" data-confirm="حذف هذا القيد نهائيًا من سجل الإجراءات؟">{% csrf_token %}<button class="danger" type="submit">حذف القيد</button></form>{% else %}<span class="muted">قيد حذف محفوظ</span>{% endif %}</td></tr>
         {% empty %}
-        <tr data-empty-row><td colspan="5" class="empty">لا توجد إجراءات مطابقة. <a href="{% url 'audit_log' %}">عرض كل الإجراءات</a></td></tr>
+        <tr data-empty-row><td colspan="6" class="empty">لا توجد إجراءات مطابقة. <a href="{% url 'audit_log' %}">عرض كل الإجراءات</a></td></tr>
         {% endfor %}
       </tbody>
     </table></div>

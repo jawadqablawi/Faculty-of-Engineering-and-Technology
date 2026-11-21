@@ -34,6 +34,7 @@ def checks():
         Club,
         Activity,
         Attachment,
+        Audit,
         StoredDocument,
         Letter,
         Task,
@@ -186,6 +187,25 @@ def checks():
         ).status_code
         == 200
     )
+    client.force_login(users[0])
+    assert client.post(f"/manage/requests/{activity_id}/delete/").status_code == 403
+    client.force_login(admin)
+    assert client.post(f"/manage/requests/{activity_id}/delete/").status_code == 302
+    assert client.get(f"/requests/{activity_id}/").status_code == 404
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT set_config('etcs.user_id',%s,true)", [str(admin.pk)])
+        audit_entry = Audit.objects.create(
+            actor=admin, action="smoke_delete", record="synthetic"
+        )
+        deletion_marker = Audit.objects.get(action="delete_request", record=activity_id)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT set_config('etcs.user_id',%s,true)", [str(users[0].pk)]
+            )
+        assert not StoredDocument.objects.filter(name=attachment.file.name).exists()
+    assert client.post(f"/manage/audit/{audit_entry.pk}/delete/").status_code == 302
+    assert client.post(f"/manage/audit/{deletion_marker.pk}/delete/").status_code == 404
     print(
         "PASS: Vercel mode with a non-superuser database owner; direct club account and immediate sign-in; private database files; cross-club denial; full approval; Arabic PDFs; safe cross-club calendar; authenticated scheduled job"
     )

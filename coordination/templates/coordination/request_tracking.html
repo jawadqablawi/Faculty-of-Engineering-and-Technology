@@ -38,3 +38,8 @@
     <ul>{% for item in tracking.requirements %}<li>{{ item.office }} · {{ item.required|yesno:"إلزامية,اختيارية" }} · {{ item.get_decision_display }}</li>{% endfor %}</ul>
   {% endif %}
 </section>
+{% if identity.role == 'coordinator' %}
+<form method="post" action="{% url 'delete_request' a.pk %}" data-confirm="حذف الطلب نهائيًا؟ سيُحذف الطلب ومرفقاته وسجل مراحله من النظام.">
+  {% csrf_token %}<button class="danger" type="submit">حذف الطلب</button>
+</form>
+{% endif %}

@@ -6,9 +6,12 @@ from coordination import extra_views as x
 from coordination import push_views, pwa_views
 from coordination import views as v
 from coordination.budget_views import database_budget
+from coordination.deletion_views import delete_audit_entry, delete_request
 from coordination.serverless_views import cron_reminders
 
 urlpatterns = [
+    path("manage/audit/<int:pk>/delete/", delete_audit_entry, name="delete_audit_entry"),
+    path("manage/requests/<uuid:pk>/delete/", delete_request, name="delete_request"),
     path("manage/storage/", database_budget, name="database_budget"),
     path("manifest.webmanifest", pwa_views.manifest, name="pwa_manifest"),
     path("sw.js", pwa_views.service_worker, name="pwa_worker"),

@@ -59,6 +59,8 @@ def state(value):
 @register.filter
 def action_label(value):
     return {
+        "delete_request": "حذف طلب",
+        "delete_audit_entry": "حذف قيد من سجل الإجراءات",
         "submit": "إرسال الطلب",
         "save_draft": "حفظ مسودة",
         "preliminary": "موافقة أولية",

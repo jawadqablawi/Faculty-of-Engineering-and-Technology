@@ -14,7 +14,15 @@ from django.utils import timezone
 from PIL import Image
 
 from .documents import optimize_image
-from .models import Activity, Attachment, Club, Notification, Profile, StoredDocument
+from .models import (
+    Activity,
+    Attachment,
+    Audit,
+    Club,
+    Notification,
+    Profile,
+    StoredDocument,
+)
 
 
 @override_settings(
@@ -51,6 +59,38 @@ class BudgetTests(TestCase):
         self.assertEqual(StoredDocument.objects.count(), 1)
         self.assertEqual(Attachment.objects.filter(activity=self.activity).count(), 2)
         self.assertEqual(Attachment.objects.values("file").distinct().count(), 1)
+
+    def test_coordinator_deletion_preserves_shared_files_and_records_the_action(self):
+        self.client.force_login(self.member)
+        self.client.post(
+            reverse("upload", args=[self.activity.pk]),
+            {"file": SimpleUploadedFile("shared.pdf", b"%PDF-1.4\nsynthetic")},
+        )
+        file = Attachment.objects.get().file.name
+        other = Activity.objects.create(
+            club=self.club, creator=self.member, kind="event", title="طلب ثانٍ"
+        )
+        Attachment.objects.create(
+            activity=other, uploader=self.member, file=file, name="shared.pdf"
+        )
+        delete = reverse("delete_request", args=[self.activity.pk])
+        self.assertEqual(self.client.post(delete).status_code, 403)
+        self.client.force_login(self.coordinator)
+        self.assertEqual(self.client.get(delete).status_code, 405)
+        self.assertRedirects(self.client.post(delete), reverse("requests"))
+        self.assertTrue(StoredDocument.objects.filter(pk=file).exists())
+        self.assertRedirects(
+            self.client.post(reverse("delete_request", args=[other.pk])),
+            reverse("requests"),
+        )
+        self.assertFalse(StoredDocument.objects.filter(pk=file).exists())
+        deletion = Audit.objects.get(action="delete_request", record=str(other.pk))
+        self.assertEqual(
+            self.client.post(
+                reverse("delete_audit_entry", args=[deletion.pk])
+            ).status_code,
+            404,
+        )
 
     @override_settings(ETCS_UPLOAD_IMAGE_MAX_EDGE=64)
     def test_image_reduction_preserves_png_transparency(self):

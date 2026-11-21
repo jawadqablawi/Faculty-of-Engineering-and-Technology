@@ -197,11 +197,13 @@ Path(__import__('os').environ['ETCS_SMOKE_ID_FILE']).write_text(str(a.pk))
         with psycopg.connect(web_url) as connection:
             with connection.transaction():
                 try:
-                    connection.execute("DELETE FROM public.coordination_audit")
+                    deleted = connection.execute(
+                        "DELETE FROM public.coordination_audit"
+                    ).rowcount
                 except psycopg.errors.InsufficientPrivilege:
                     pass
                 else:
-                    raise AssertionError("Web role may delete audit history")
+                    assert deleted == 0, "Unscoped web role deleted audit history"
         print("PASS: restricted web role cannot delete audit history")
     finally:
         admin_connection.execute(
