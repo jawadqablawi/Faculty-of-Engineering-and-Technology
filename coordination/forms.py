@@ -1,4 +1,8 @@
 from django import forms
+from django.contrib.auth.forms import SetPasswordForm
+from django.contrib.auth.hashers import check_password
+from django.contrib.auth.models import User
+from django.contrib.auth.password_validation import validate_password
 from .models import (
     Activity,
     Letter,
@@ -12,6 +16,53 @@ from .models import (
     Publication,
     ClubPlan,
 )
+
+
+class ClubAccountForm(forms.Form):
+    email = forms.EmailField(
+        label="البريد الإلكتروني",
+        max_length=User._meta.get_field("username").max_length,
+        widget=forms.EmailInput(attrs={"autocomplete": "off", "dir": "ltr"}),
+    )
+    club = forms.ModelChoiceField(
+        label="النادي",
+        queryset=Club.objects.filter(active=True).order_by("name"),
+        empty_label="اختر النادي",
+    )
+    temporary_password = forms.CharField(
+        label="كلمة المرور المؤقتة",
+        strip=False,
+        max_length=4096,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+
+    def clean_email(self):
+        email = self.cleaned_data["email"].lower()
+        if User.objects.filter(email__iexact=email).exists() or User.objects.filter(
+            username__iexact=email
+        ).exists():
+            raise forms.ValidationError("يوجد حساب لهذا البريد بالفعل.")
+        return email
+
+    def clean(self):
+        cleaned_data = super().clean()
+        email = cleaned_data.get("email")
+        password = cleaned_data.get("temporary_password")
+        if email and password:
+            try:
+                validate_password(password, User(username=email, email=email))
+            except forms.ValidationError as error:
+                self.add_error("temporary_password", error)
+        return cleaned_data
+
+
+class FirstPasswordForm(SetPasswordForm):
+    def clean(self):
+        cleaned_data = super().clean()
+        password = cleaned_data.get("new_password1")
+        if password and check_password(password, self.user.password):
+            self.add_error("new_password1", "اختر كلمة مرور مختلفة عن كلمة المرور المؤقتة.")
+        return cleaned_data
 
 
 class ActivityForm(forms.ModelForm):

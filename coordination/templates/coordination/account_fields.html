@@ -1,0 +1,31 @@
+<form method="post">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  {% for field in form %}
+    <div class="field">
+      {{ field.label_tag }}
+      <div class="credential-input">
+        {{ field }}
+        {% if field.field.widget.input_type == 'password' %}
+          <button type="button" class="secondary" data-password-toggle aria-controls="{{ field.id_for_label }}" aria-label="إظهار {{ field.label }}" aria-pressed="false" hidden>إظهار</button>
+        {% endif %}
+      </div>
+      {% if field.help_text %}<div id="{{ field.auto_id }}_helptext" class="muted">{{ field.help_text|safe }}</div>{% endif %}
+      {{ field.errors }}
+    </div>
+  {% endfor %}
+  {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+  <button class="account-submit">{{ submit_label }}</button>
+</form>
+<script>
+  for (const button of document.querySelectorAll('[data-password-toggle]')) {
+    const input = document.getElementById(button.getAttribute('aria-controls'));
+    button.hidden = false;
+    button.addEventListener('click', () => {
+      const show = input.type === 'password';
+      input.type = show ? 'text' : 'password';
+      button.textContent = show ? 'إخفاء' : 'إظهار';
+      button.setAttribute('aria-pressed', String(show));
+    });
+  }
+</script>

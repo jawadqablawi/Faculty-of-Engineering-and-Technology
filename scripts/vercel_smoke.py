@@ -40,14 +40,30 @@ def checks():
 
     admin = User.objects.get(email="vercel-owner@example.test")
     clubs = list(Club.objects.order_by("pk")[:2])
-    users = []
-    for i, club in enumerate(clubs):
-        user = User.objects.create_user(
-            f"vercel-club-{i}@example.test", email=f"vercel-club-{i}@example.test"
-        )
-        Profile.objects.create(user=user, role="club", club=club, verified=True)
-        users.append(user)
+    existing = User.objects.create_user(
+        "vercel-club-0@example.test", email="vercel-club-0@example.test"
+    )
+    Profile.objects.create(user=existing, role="club", club=clubs[0], verified=True)
     client = Client(HTTP_X_FORWARDED_PROTO="https")
+    client.force_login(admin)
+    email = "vercel-club-1@example.test"
+    temporary = "Synthetic-temporary-840!"
+    permanent = "Synthetic-permanent-540!"
+    assert client.post(
+        "/manage/accounts/new-club/",
+        {"email": email, "club": clubs[1].pk, "temporary_password": temporary},
+    ).url == "/manage/accounts/"
+    client.logout()
+    assert client.post(
+        "/login/", {"username": email, "password": temporary}
+    ).url == "/first-password-change/"
+    assert client.get("/requests/").url == "/first-password-change/"
+    assert client.post(
+        "/first-password-change/",
+        {"new_password1": permanent, "new_password2": permanent},
+    ).url == "/"
+    assert client.get("/requests/").status_code == 200
+    users = [existing, User.objects.get(email=email)]
     client.force_login(users[0])
     page = client.get("/new/event/")
     assert page.status_code == 200
@@ -140,7 +156,7 @@ def checks():
         == 200
     )
     print(
-        "PASS: Vercel mode with a non-superuser database owner; private database files; cross-club denial; full approval; Arabic PDFs; safe cross-club calendar; authenticated scheduled job"
+        "PASS: Vercel mode with a non-superuser database owner; direct club account and mandatory password change; private database files; cross-club denial; full approval; Arabic PDFs; safe cross-club calendar; authenticated scheduled job"
     )
 
 

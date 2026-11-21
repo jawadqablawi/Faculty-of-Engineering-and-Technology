@@ -35,6 +35,7 @@ class Profile(models.Model):
         "Activity", related_name="authorized_readers", blank=True
     )
     verified = models.BooleanField(default=False)
+    must_change_password = models.BooleanField(default=False, db_default=False)
 
     def __str__(self):
         return str(self.user)

@@ -1,5 +1,6 @@
-from django.db import connection, transaction
 from django.core.exceptions import ImproperlyConfigured
+from django.db import connection, transaction
+from django.shortcuts import redirect
 
 
 class DatabaseIdentityMiddleware:
@@ -23,3 +24,20 @@ class DatabaseIdentityMiddleware:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT set_config('etcs.user_id', %s, true)", [user_id])
             return self.get_response(request)
+
+
+class TemporaryPasswordMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        return self.get_response(request)
+
+    def process_view(self, request, view_func, view_args, view_kwargs):
+        if request.resolver_match.view_name in {"first_password_change", "logout"}:
+            return None
+        if request.user.is_authenticated:
+            profile = getattr(request.user, "profile", None)
+            if profile and profile.must_change_password:
+                return redirect("first_password_change")
+        return None

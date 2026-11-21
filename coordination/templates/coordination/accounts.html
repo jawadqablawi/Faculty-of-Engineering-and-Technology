@@ -1,1 +1,48 @@
-{% extends 'coordination/base.html' %}{% block content %}<h1>المستخدمون</h1><a href="{% url 'invite' %}" class="button">دعوة مستخدم</a><p class="muted">حدد صلاحيات كل مستخدم ونطاق النوادي المسموحة له.</p><div class="card"><table><tr><th>البريد</th><th>الدور</th><th>النادي</th><th>الحالة</th><th></th></tr>{% for u in users %}<tr><td>{{ u.email }}</td><td>{{ u.profile.get_role_display }}</td><td>{{ u.profile.club|default:'—' }}</td><td>{{ u.is_active|yesno:'نشط,معطل' }}</td><td>{% if u.profile %}<a href="{% url 'permissions' u.pk %}">الصلاحيات</a>{% endif %}{% if u != user %}<form method="post">{% csrf_token %}<input type="hidden" name="user" value="{{ u.pk }}"><button class="secondary">{{ u.is_active|yesno:'تعطيل,تفعيل' }}</button></form>{% endif %}</td></tr>{% endfor %}</table></div><div class="card"><h2>دعوات بانتظار التفعيل</h2>{% for invitation in invitations %}<div class="toolbar"><span>{{ invitation.email }} · تنتهي {{ invitation.expires }}</span><form method="post" action="{% url 'revoke_invitation' invitation.pk %}">{% csrf_token %}<button class="secondary">إلغاء الدعوة</button></form></div>{% empty %}<p>لا توجد دعوات معلقة</p>{% endfor %}</div>{% endblock %}
+{% extends 'coordination/base.html' %}
+{% block content %}
+<h1>المستخدمون والدعوات</h1>
+<div class="toolbar">
+  <a href="{% url 'create_club_account' %}" class="button">إنشاء حساب نادي</a>
+  <a href="{% url 'invite' %}" class="button secondary">إرسال دعوة بالبريد</a>
+</div>
+<div class="card table-wrap">
+  <table aria-label="حسابات المستخدمين">
+    <thead><tr><th scope="col">البريد الإلكتروني</th><th scope="col">الدور</th><th scope="col">النادي</th><th scope="col">الحالة</th><th scope="col">الإجراءات</th></tr></thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td><bdi>{{ u.email }}</bdi></td>
+        <td>{{ u.profile.get_role_display }}</td>
+        <td>{{ u.profile.club|default:'—' }}</td>
+        <td>
+          {% if not u.is_active %}معطّل{% elif u.profile.must_change_password %}بانتظار تغيير كلمة المرور{% else %}نشط{% endif %}
+        </td>
+        <td>
+          <div class="toolbar">
+            {% if u.profile %}<a href="{% url 'permissions' u.pk %}">الصلاحيات</a>{% endif %}
+            {% if u != user %}
+            <form method="post">
+              {% csrf_token %}
+              <input type="hidden" name="user" value="{{ u.pk }}">
+              <button class="secondary">{{ u.is_active|yesno:'تعطيل,تفعيل' }}</button>
+            </form>
+            {% endif %}
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="card">
+  <h2>دعوات بانتظار التفعيل</h2>
+  {% for invitation in invitations %}
+  <div class="toolbar">
+    <span><bdi>{{ invitation.email }}</bdi> · تنتهي {{ invitation.expires }}</span>
+    <form method="post" action="{% url 'revoke_invitation' invitation.pk %}">
+      {% csrf_token %}<button class="secondary">إلغاء الدعوة</button>
+    </form>
+  </div>
+  {% empty %}<p>لا توجد دعوات معلقة</p>{% endfor %}
+</div>
+{% endblock %}

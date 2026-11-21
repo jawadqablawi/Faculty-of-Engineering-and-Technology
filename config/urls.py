@@ -39,6 +39,9 @@ urlpatterns = [
     ),
     path("", v.home, name="home"),
     path("login/", v.SecureLogin.as_view(), name="login"),
+    path(
+        "first-password-change/", v.first_password_change, name="first_password_change"
+    ),
     path("logout/", auth.LogoutView.as_view(), name="logout"),
     path(
         "password-reset/",
@@ -85,6 +88,9 @@ urlpatterns = [
     path("reports/", v.reports, name="reports"),
     path("manage/invite/", v.invite, name="invite"),
     path("manage/accounts/", v.accounts, name="accounts"),
+    path(
+        "manage/accounts/new-club/", v.create_club_account, name="create_club_account"
+    ),
     path("accept/<uuid:token>/", v.accept, name="accept"),
     path("operations/<str:module>/", v.records, name="records"),
     path("operations/<str:module>/<int:pk>/", v.records, name="record_edit"),

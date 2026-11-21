@@ -3,6 +3,7 @@ from datetime import timedelta, datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.forms import (
     SetPasswordForm,
@@ -19,11 +20,13 @@ from django.core import signing
 from django.conf import settings
 from .security import consume_limit
 from .documents import validate_document
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Q, Count, Sum
 from django.http import FileResponse, HttpResponse, JsonResponse
 from django.urls import reverse
 from django.utils import timezone
+from django.views.decorators.cache import never_cache
+from django.views.decorators.debug import sensitive_post_parameters
 from django.views.decorators.http import require_POST
 from django.contrib.auth.models import User
 from .models import *
@@ -52,7 +55,10 @@ class LimitedPasswordReset(PasswordResetView):
 
 
 class EmailAuthenticationForm(AuthenticationForm):
-    username = forms.EmailField(label="البريد الإلكتروني")
+    username = forms.EmailField(
+        label="البريد الإلكتروني",
+        widget=forms.EmailInput(attrs={"autocomplete": "username", "dir": "ltr"}),
+    )
 
     def clean_username(self):
         return self.cleaned_data["username"].strip().lower()
@@ -70,6 +76,11 @@ class SecureLogin(LoginView):
             )
         return super().post(request, *a, **kw)
 
+    def get_success_url(self):
+        if self.request.user.profile.must_change_password:
+            return reverse("first_password_change")
+        return super().get_success_url()
+
     def form_valid(self, form):
         try:
             profile(form.get_user())
@@ -84,6 +95,8 @@ def context(request):
         return {}
     try:
         p = profile(request.user)
+        if p.must_change_password:
+            return {}
         return {
             "identity": p,
             "upload_limit_mb": settings.ETCS_MAX_UPLOAD_BYTES // (1024 * 1024),
@@ -1038,6 +1051,98 @@ def accept(request, token):
     )
 
 
+@sensitive_post_parameters("new_password1", "new_password2")
+@never_cache
+@login_required
+@transaction.atomic
+def first_password_change(request):
+    current_profile = profile(request.user)
+    if not current_profile.must_change_password:
+        return redirect("home")
+
+    user = request.user
+    if request.method == "POST":
+        user = User.objects.select_for_update().get(pk=user.pk)
+        current_profile.refresh_from_db(fields=["must_change_password"])
+        if (
+            not current_profile.must_change_password
+            or user.password != request.user.password
+        ):
+            return redirect("login")
+
+    form = FirstPasswordForm(user, request.POST if request.method == "POST" else None)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        current_profile.must_change_password = False
+        current_profile.save(update_fields=["must_change_password"])
+        update_session_auth_hash(request, user)
+        audit(user, "change_temporary_password", user.pk)
+        messages.success(
+            request, "تم تحديث كلمة المرور. يمكنك الآن استخدام مساحة النادي."
+        )
+        return redirect("home")
+    return render(
+        request,
+        "coordination/account_form.html",
+        {
+            "form": form,
+            "title": "تغيير كلمة المرور المؤقتة",
+            "description": "اختر كلمة مرور جديدة لتتمكن من دخول مساحة النادي.",
+            "submit_label": "حفظ كلمة المرور والدخول",
+        },
+    )
+
+
+@sensitive_post_parameters("temporary_password")
+@never_cache
+@login_required
+def create_club_account(request):
+    if profile(request.user).role != "coordinator":
+        raise PermissionDenied
+
+    form = ClubAccountForm(request.POST if request.method == "POST" else None)
+    if request.method == "POST" and form.is_valid():
+        email = form.cleaned_data["email"]
+        try:
+            with transaction.atomic():
+                user = User.objects.create_user(
+                    username=email,
+                    email=email,
+                    password=form.cleaned_data["temporary_password"],
+                )
+                club = form.cleaned_data["club"]
+                Profile.objects.create(
+                    user=user,
+                    role="club",
+                    club=club,
+                    verified=True,
+                    must_change_password=True,
+                )
+                audit(request.user, "create_club_account", user.pk, str(club.pk))
+        except IntegrityError:
+            if not User.objects.filter(username=email).exists():
+                raise
+            form.add_error("email", "يوجد حساب لهذا البريد بالفعل.")
+        else:
+            messages.success(
+                request,
+                "تم إنشاء حساب النادي. سلّم بيانات الدخول لمسؤول النادي بطريقة آمنة.",
+            )
+            return redirect("accounts")
+
+    return render(
+        request,
+        "coordination/account_form.html",
+        {
+            "form": form,
+            "title": "إنشاء حساب نادي",
+            "description": "سلّم البريد وكلمة المرور المؤقتة لمسؤول النادي مباشرةً. سيُطلب منه تغييرها عند أول دخول.",
+            "submit_label": "إنشاء الحساب",
+            "back_to_accounts": True,
+        },
+    )
+
+
 @login_required
 def accounts(request):
     if profile(request.user).role != "coordinator":
@@ -1055,7 +1160,7 @@ def accounts(request):
         request,
         "coordination/accounts.html",
         {
-            "users": User.objects.select_related("profile").all(),
+            "users": User.objects.select_related("profile__club").order_by("email"),
             "invitations": Invitation.objects.filter(
                 used=False, expires__gt=timezone.now()
             ).order_by("-pk"),

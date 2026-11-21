@@ -3,6 +3,8 @@ from datetime import timedelta, time
 from django.test import TestCase, override_settings, Client
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError, PermissionDenied
+from django.core import mail
+from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.utils import timezone
@@ -64,6 +66,83 @@ class WorkflowTests(TestCase):
         r = self.client.get("/login/")
         self.assertContains(r, 'dir="rtl"')
         self.assertContains(r, "البريد الإلكتروني")
+
+    def test_direct_club_account_first_login_and_scope(self):
+        create_url = reverse("create_club_account")
+        change_url = reverse("first_password_change")
+        email = "new.manager@example.test"
+        temporary = "Synthetic-temp-642!r"
+        permanent = "Synthetic-new-831!w"
+        data = {
+            "email": email.upper(),
+            "club": self.civil.pk,
+            "temporary_password": temporary,
+        }
+        self.login(self.a)
+        self.assertEqual(self.client.post(create_url, data).status_code, 403)
+        self.login(self.deputy)
+        self.assertEqual(self.client.post(create_url, data).status_code, 403)
+
+        self.login(self.admin)
+        self.assertRedirects(self.client.post(create_url, data), reverse("accounts"))
+        self.assertEqual(mail.outbox, [])
+        account = User.objects.get(email=email)
+        self.assertTrue(account.check_password(temporary))
+        self.assertEqual(account.profile.club, self.civil)
+        self.assertEqual(account.profile.role, "club")
+        self.assertTrue(account.profile.must_change_password)
+        self.assertFalse(account.is_staff)
+        self.assertFalse(account.is_superuser)
+        self.assertContains(self.client.get(reverse("accounts")), "بانتظار تغيير كلمة المرور")
+        duplicate = self.client.post(create_url, data)
+        self.assertContains(duplicate, "يوجد حساب لهذا البريد")
+        self.assertNotContains(duplicate, temporary)
+        self.assertEqual(User.objects.filter(email__iexact=email).count(), 1)
+
+        club = Client()
+        login_url = reverse("login")
+        credentials = {"username": email, "password": temporary}
+        self.assertRedirects(
+            club.post(login_url, {**credentials, "next": reverse("requests")}), change_url
+        )
+        for url in (reverse("requests"), reverse("accounts"), "/admin/", reverse("calendar_export")):
+            self.assertRedirects(club.get(url), change_url, fetch_redirect_response=False)
+            self.assertRedirects(club.post(url), change_url, fetch_redirect_response=False)
+        other_session = Client()
+        self.assertRedirects(other_session.post(login_url, credentials), change_url)
+
+        reused = club.post(change_url, {"new_password1": temporary, "new_password2": temporary})
+        self.assertContains(reused, "اختر كلمة مرور مختلفة")
+        account.profile.refresh_from_db()
+        self.assertTrue(account.profile.must_change_password)
+        self.assertRedirects(
+            club.post(change_url, {"new_password1": permanent, "new_password2": permanent}),
+            reverse("home"),
+        )
+        account.refresh_from_db()
+        self.assertTrue(account.check_password(permanent))
+        self.assertFalse(account.check_password(temporary))
+        self.assertFalse(account.profile.must_change_password)
+        self.assertEqual(club.get(reverse("club_profile", args=[self.civil.pk])).status_code, 200)
+        self.assertEqual(club.get(reverse("activity", args=[self.activity.pk])).status_code, 404)
+        self.assertNotContains(club.get(reverse("requests")), self.activity.title)
+        self.assertRedirects(other_session.get(reverse("requests")), login_url + "?next=/requests/")
+        self.assertContains(Client().post(login_url, credentials), "تسجيل الدخول")
+        self.assertRedirects(
+            Client().post(login_url, {"username": email, "password": permanent}), reverse("home")
+        )
+
+    def test_direct_club_account_rejects_inactive_club(self):
+        self.civil.active = False
+        self.civil.save(update_fields=["active"])
+        self.login(self.admin)
+        email = "inactive.club@example.test"
+        response = self.client.post(
+            reverse("create_club_account"),
+            {"email": email, "club": self.civil.pk, "temporary_password": "Synthetic-temp-642!r"},
+        )
+        self.assertTrue(response.context["form"].errors.get("club"))
+        self.assertFalse(User.objects.filter(email=email).exists())
 
     def test_cross_club_urls_files_and_actions(self):
         f = Attachment.objects.create(

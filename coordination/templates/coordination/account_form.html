@@ -1,0 +1,10 @@
+{% extends 'coordination/base.html' %}
+{% block title %}{{ title }} · نظام تنسيق الكلية{% endblock %}
+{% block content %}
+<section class="card account-panel">
+  {% if back_to_accounts %}<a href="{% url 'accounts' %}">العودة إلى المستخدمين والدعوات</a>{% endif %}
+  <h1>{{ title }}</h1>
+  <p class="muted">{{ description }}</p>
+  {% include 'coordination/account_fields.html' %}
+</section>
+{% endblock %}
