@@ -1,3 +1,4 @@
+{% load request_tracking %}
 <div class="table-wrap">
   <table aria-label="الطلبات">
     {% if table_columns %}
@@ -11,7 +12,7 @@
           <td><strong>{{ a.title }}</strong><br><small dir="ltr">{{ a.number|default:'مسودة' }}</small></td>
           <td>{{ a.club.name }}</td>
           <td data-sort="{{ a.date|date:'Y-m-d' }}">{{ a.get_kind_display }}<br><small>{{ a.date|default:'لم يحدد' }}</small></td>
-          <td>{% include 'coordination/status_badge.html' %}</td>
+          <td>{% with progress=a|compact_progress %}{% if progress %}<bdi class="muted" aria-label="رقم المرحلة">{{ progress }}</bdi> · {% endif %}{% endwith %}{% include 'coordination/status_badge.html' %}</td>
           <td><a href="{% url 'activity' a.pk %}">عرض الطلب ←</a></td>
         </tr>
       {% empty %}

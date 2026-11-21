@@ -1,0 +1,21 @@
+<section class="card">
+  <h2>المطبوعات</h2>
+  <ul class="file-list">
+    {% for file in attachments %}
+      <li>
+        <a href="{% url 'download' file.pk %}"><bdi>{{ file.name }}</bdi></a>
+        {% if file.print_description or file.purpose %}<p>{% firstof file.print_description file.purpose %}</p>{% endif %}
+        {% if editable %}<form method="post" data-confirm="إزالة هذا المرفق؟" action="{% url 'delete_attachment' file.pk %}">{% csrf_token %}<button class="secondary">إزالة الملف</button></form>{% endif %}
+      </li>
+    {% empty %}<li class="muted">لا توجد ملفات مرفقة.</li>{% endfor %}
+  </ul>
+  {% if editable %}
+    <form method="post" enctype="multipart/form-data" action="{% url 'upload' a.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="printing" value="1">
+      <p><label for="print-file">ملف للطباعة</label><input id="print-file" type="file" name="file" required></p>
+      <p><label for="print-description">وصف الملف</label><textarea id="print-description" name="description" maxlength="500" required></textarea></p>
+      <button class="secondary">إضافة الملف</button>
+    </form>
+  {% endif %}
+</section>

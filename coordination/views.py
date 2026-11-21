@@ -327,10 +327,15 @@ def edit_activity(request, kind="event", pk=None):
 @login_required
 def activity(request, pk):
     from .scheduling import has_conflicts
+    from .request_tracking import tracking
 
-    a = get_object_or_404(activities(request.user), pk=pk)
+    a = get_object_or_404(
+        activities(request.user).prefetch_related("approval_requirements"), pk=pk
+    )
     p = profile(request.user)
     conflicts = has_conflicts(a)
+    can_review = allowed(request.user, "requests", True)
+    tracker = tracking(a, show_reason=p.role == "club" or can_review)
     if p.role == "club" or a.details.get("simple_request"):
         steps = {
             "review": [("forward", "إحالة إلى المجلس")],
@@ -345,22 +350,21 @@ def activity(request, pk):
             {
                 "a": a,
                 "conflicts": conflicts,
+                "tracking": tracker,
                 "editable": p.role == "club" and a.status in {"draft", "changes"},
                 "requirements": a.details.get("requirements", []),
                 "attachments": a.attachments.filter(deleted=False).order_by("created"),
-                "last_note": a.history.filter(status__in=["changes", "rejected"])
-                .exclude(note="")
-                .last()
-                if a.status in {"changes", "rejected"}
-                else None,
-                "next_steps": steps.get(a.status, [])
-                if allowed(request.user, "requests", True)
-                else [],
+                "next_steps": steps.get(a.status, []) if can_review else [],
                 "report_note": a.report.correction_note
                 if not a.details.get("simple_request") and hasattr(a, "report")
                 else "",
             },
         )
+    display_history = a.history.select_related("actor").order_by("created", "pk")
+    if not can_review or request.GET.get("details") != "1":
+        display_history = display_history.defer("snapshot")
+    if not can_review:
+        display_history = display_history.defer("note")
     # Conflict existence only; never expose another club's private request.
     return render(
         request,
@@ -368,6 +372,8 @@ def activity(request, pk):
         {
             "a": a,
             "conflicts": conflicts,
+            "tracking": tracker,
+            "display_history": display_history,
             "details": [
                 (DETAIL_FIELDS.get(k, k), v)
                 for k, v in a.details.items()

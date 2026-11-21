@@ -6,13 +6,38 @@
 {% endif %}
 <div class="section-heading">
   <h1>{{ a.title }}</h1>
-  {% include 'coordination/status_badge.html' %}
+
 </div>
 <p>{{ a.club.name }}{% if a.number %} · <bdi>{{ a.number }}</bdi>{% endif %}</p>
 {% if conflicts %}<div class="message warning" role="alert"><strong>تعارض محتمل في المكان.</strong> يوجد حجز معتمد يتداخل مع موعد هذا النشاط. راجع الموعد أو المكان قبل المتابعة.</div>{% endif %}
-{% include 'coordination/approval_timeline.html' %}
+{% include 'coordination/request_tracking.html' %}
 {% if report_note %}<div class="message">{{ report_note|linebreaksbr }}</div>{% endif %}
-{% if last_note %}<div class="message">{{ last_note.note|linebreaksbr }}</div>{% endif %}
+{% if next_steps %}
+<section class="card">
+  <h2>إجراء على الطلب</h2>
+  <form method="post" action="{% url 'action' a.pk %}">
+    {% csrf_token %}
+    <p><label for="approval-note">ملاحظة القرار أو مرجعه</label><textarea id="approval-note" name="note" required></textarea></p>
+    <div class="toolbar">
+      {% for value, label in next_steps %}<button name="action" value="{{ value }}">{{ label }}</button>{% endfor %}
+      {% if a.status == 'review' or a.status == 'preliminary' %}<button class="secondary" name="action" value="changes">طلب تعديل</button>{% endif %}
+      <button class="danger" name="action" value="reject" data-confirm="رفض هذا الطلب؟">رفض الطلب</button>
+    </div>
+  </form>
+</section>
+{% endif %}
+{% if editable %}
+  {% include 'coordination/request_printing.html' %}
+{% if editable %}
+  <form method="post" action="{% url 'action' a.pk %}">
+    {% csrf_token %}
+    <button name="action" value="submit">إرسال الطلب للمراجعة</button>
+  </form>
+{% endif %}
+{% endif %}
+<details id="request-details" class="card request-details"{% if request.GET.details == '1' %} open{% endif %}>
+  <summary>عرض تفاصيل الطلب</summary>
+{% if request.GET.details != '1' %}<p><a href="?details=1#request-details">فتح العرض الكامل للطلب</a></p>{% endif %}
 <section class="card">
   <h2>تفاصيل الطلب</h2>
   <p>{{ a.description|linebreaksbr }}</p>
@@ -29,45 +54,6 @@
   </table></div>
   {% else %}<p class="muted">لا توجد احتياجات.</p>{% endif %}
 </section>
-<section class="card">
-  <h2>المطبوعات</h2>
-  <ul class="file-list">
-    {% for file in attachments %}
-      <li>
-        <a href="{% url 'download' file.pk %}"><bdi>{{ file.name }}</bdi></a>
-        {% if file.print_description or file.purpose %}<p>{% firstof file.print_description file.purpose %}</p>{% endif %}
-        {% if editable %}<form method="post" data-confirm="إزالة هذا المرفق؟" action="{% url 'delete_attachment' file.pk %}">{% csrf_token %}<button class="secondary">إزالة الملف</button></form>{% endif %}
-      </li>
-    {% empty %}<li class="muted">لا توجد ملفات مرفقة.</li>{% endfor %}
-  </ul>
-  {% if editable %}
-    <form method="post" enctype="multipart/form-data" action="{% url 'upload' a.pk %}">
-      {% csrf_token %}
-      <input type="hidden" name="printing" value="1">
-      <p><label for="print-file">ملف للطباعة</label><input id="print-file" type="file" name="file" required></p>
-      <p><label for="print-description">وصف الملف</label><textarea id="print-description" name="description" maxlength="500" required></textarea></p>
-      <button class="secondary">إضافة الملف</button>
-    </form>
-  {% endif %}
-</section>
-{% if editable %}
-  <form method="post" action="{% url 'action' a.pk %}">
-    {% csrf_token %}
-    <button name="action" value="submit">إرسال الطلب للمراجعة</button>
-  </form>
-{% endif %}
-{% if next_steps %}
-<section class="card">
-  <h2>إجراء على الطلب</h2>
-  <form method="post" action="{% url 'action' a.pk %}">
-    {% csrf_token %}
-    <p><label for="approval-note">ملاحظة القرار أو مرجعه</label><textarea id="approval-note" name="note" required></textarea></p>
-    <div class="toolbar">
-      {% for value, label in next_steps %}<button name="action" value="{{ value }}">{{ label }}</button>{% endfor %}
-      {% if a.status == 'review' or a.status == 'preliminary' %}<button class="secondary" name="action" value="changes">طلب تعديل</button>{% endif %}
-      <button class="danger" name="action" value="reject" data-confirm="رفض هذا الطلب؟">رفض الطلب</button>
-    </div>
-  </form>
-</section>
-{% endif %}
+  {% if not editable %}{% include 'coordination/request_printing.html' %}{% endif %}
+</details>
 {% endblock %}

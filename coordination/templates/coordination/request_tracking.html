@@ -1,0 +1,34 @@
+{% load static tz %}
+<link rel="stylesheet" href="{% static 'coordination/css/request-workflow.css' %}">
+<section class="card request-tracking" aria-labelledby="tracking-title">
+  <div class="section-heading">
+    <h2 id="tracking-title">الحالة الحالية</h2>
+    {% include 'coordination/status_badge.html' %}
+  </div>
+  <p>
+    {% if tracking.age != None %}
+      {% if tracking.age == 0 %}منذ اليوم{% else %}منذ {{ tracking.age }} يوم{% endif %}
+      · <time datetime="{{ tracking.entered|localtime|date:'c' }}">{{ tracking.entered|localtime|date:"j F Y، H:i" }}</time>
+    {% else %}<span class="muted">تاريخ دخول المرحلة غير مسجّل.</span>{% endif %}
+  </p>
+  <p><strong>الخطوة التالية</strong> {{ tracking.next_step }}{% if tracking.owner %} <span class="muted">· {{ tracking.owner }}</span>{% endif %}</p>
+  {% if tracking.reason %}<p class="message {% if a.status == 'rejected' %}error{% else %}warning{% endif %}"><strong>السبب</strong> {{ tracking.reason|linebreaksbr }}</p>{% endif %}
+  {% if editable and a.status == 'changes' %}<a class="button" href="{% url 'edit_activity' a.pk %}">تعديل الطلب</a>{% endif %}
+  <ol class="tracking-steps" aria-label="مراحل الطلب">
+    {% for step in tracking.stages %}
+      <li data-state="{{ step.state }}"{% if step.current %} aria-current="step"{% endif %}>
+        <span class="tracking-marker" aria-hidden="true">{% if step.state == 'done' %}✓{% elif step.state == 'attention' or step.state == 'stopped' %}!{% else %}{{ forloop.counter }}{% endif %}</span>
+        <div>
+          <strong>{{ step.label }}</strong>
+          <small>{% if step.state == 'done' %}مكتملة{% elif step.state == 'current' %}المرحلة الحالية{% elif step.state == 'attention' %}مطلوب تعديل{% elif step.state == 'stopped' %}توقفت هنا{% else %}قادمة{% endif %}</small>
+          {% if step.date %}<time datetime="{{ step.date|localtime|date:'c' }}">{{ step.date|localtime|date:"j F Y، H:i" }}</time>{% endif %}
+          {% if step.actor %}<small>{{ step.actor }}</small>{% endif %}
+        </div>
+      </li>
+    {% endfor %}
+  </ol>
+  {% if tracking.requirements %}
+    <h3>جهات موافقة إضافية</h3>
+    <ul>{% for item in tracking.requirements %}<li>{{ item.office }} · {{ item.required|yesno:"إلزامية,اختيارية" }} · {{ item.get_decision_display }}</li>{% endfor %}</ul>
+  {% endif %}
+</section>

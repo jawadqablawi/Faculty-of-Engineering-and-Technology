@@ -151,6 +151,72 @@ class WorkflowTests(TestCase):
         self.assertTrue(response.context["form"].errors.get("club"))
         self.assertFalse(User.objects.filter(email=email).exists())
 
+    def test_tracking_uses_actual_workflow_and_protects_decision_notes(self):
+        reviewer = User.objects.create_user("reviewer@example.test")
+        reviewer_profile = Profile.objects.create(
+            user=reviewer,
+            role="reviewer",
+            verified=True,
+            modules=["requests"],
+        )
+        reviewer_profile.clubs.add(self.computer)
+        activity = self.activity
+        activity.details = {"simple_request": True}
+        activity.save(update_fields=["details"])
+        today = timezone.now()
+        by_status = {
+            "draft": "التقديم",
+            "review": "المراجعة",
+            "changes": "المراجعة",
+            "preliminary": "موافقة أولية",
+            "council": "المجلس",
+            "approvals": "شؤون الطلبة",
+            "student_approved": "الجامعة",
+            "approved": "الاعتماد الرسمي",
+            "completed": "الإغلاق",
+        }
+        url = reverse("activity", args=[activity.pk])
+        self.client.force_login(self.admin)
+        for status, label in by_status.items():
+            Activity.objects.filter(pk=activity.pk).update(status=status)
+            page = self.client.get(url)
+            current = [
+                step["label"]
+                for step in page.context["tracking"]["stages"]
+                if step["current"]
+            ]
+            self.assertEqual(current, [label])
+            self.assertContains(
+                page, 'id="request-details" class="card request-details">'
+            )
+        Activity.objects.filter(pk=activity.pk).update(status="rejected")
+        History.objects.create(
+            activity=activity,
+            actor=self.admin,
+            previous="council",
+            status="rejected",
+            note="سبب قرار اختباري",
+        )
+        response = self.client.get(url)
+        self.assertContains(response, "سبب قرار اختباري")
+        self.assertEqual(response.context["tracking"]["age"], 0)
+        self.assertLessEqual(today, response.context["tracking"]["entered"])
+        self.assertEqual(
+            [
+                step["label"]
+                for step in response.context["tracking"]["stages"]
+                if step["state"] == "stopped"
+            ],
+            ["المجلس"],
+        )
+        self.assertContains(
+            self.client.get(url + "?details=1"), 'class="card request-details" open'
+        )
+        self.client.force_login(reviewer)
+        self.assertNotContains(self.client.get(url), "سبب قرار اختباري")
+        self.client.force_login(self.b)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
     def test_cross_club_urls_files_and_actions(self):
         f = Attachment.objects.create(
             activity=self.activity,
